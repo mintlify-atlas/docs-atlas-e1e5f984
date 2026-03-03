@@ -1,0 +1,95 @@
+---
+title: Health Check
+description: Check if the API server is running and healthy
+---
+
+## GET /api/v1/health
+
+Check the health status of the CALZADO J&R API server. This endpoint is useful for monitoring, load balancers, and container orchestration systems.
+
+### Authentication
+
+No authentication required - this is a public endpoint.
+
+### Response
+
+<ResponseField name="status" type="string" required>
+  Health status of the server. Always returns "healthy" when the server is running.
+</ResponseField>
+
+<ResponseField name="project" type="string" required>
+  Project identifier: "CALZADO J&R"
+</ResponseField>
+
+<ResponseField name="version" type="string" required>
+  Current API version: "0.1.0"
+</ResponseField>
+
+### Example Request
+
+```bash cURL
+curl http://localhost:8000/api/v1/health
+```
+
+### Example Response
+
+```json 200 OK
+{
+  "status": "healthy",
+  "project": "CALZADO J&R",
+  "version": "0.1.0"
+}
+```
+
+## Usage
+
+### Docker Health Checks
+
+This endpoint is used by Docker Compose to verify the backend service is ready:
+
+```yaml docker-compose.yml
+services:
+  be:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+### Monitoring
+
+Use this endpoint to monitor API availability:
+
+```python Python
+import requests
+
+def check_api_health():
+    try:
+        response = requests.get("http://localhost:8000/api/v1/health", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            return data["status"] == "healthy"
+    except requests.RequestException:
+        return False
+    return False
+```
+
+```javascript JavaScript
+async function checkApiHealth() {
+  try {
+    const response = await fetch('http://localhost:8000/api/v1/health');
+    if (response.ok) {
+      const data = await response.json();
+      return data.status === 'healthy';
+    }
+  } catch (error) {
+    return false;
+  }
+  return false;
+}
+```
+
+## Source Reference
+
+Defined in `be/app/main.py:76-88`

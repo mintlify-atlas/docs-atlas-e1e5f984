@@ -85,6 +85,12 @@
             "pages": [
               "api/users/get-me"
             ]
+          },
+          {
+            "group": "Health",
+            "pages": [
+              "api/health"
+            ]
           }
         ]
       }
