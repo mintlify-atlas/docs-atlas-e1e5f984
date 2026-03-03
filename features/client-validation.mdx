@@ -1,0 +1,327 @@
+---
+title: Client Validation
+description: Administrator workflow for validating and activating client accounts in CALZADO J&R
+---
+
+## Overview
+
+When clients register themselves through the public registration form, their accounts are created in an **inactive** state. An administrator must manually review and validate each client account before the client can log in and access the system.
+
+## Why Client Validation?
+
+Client validation serves several purposes:
+
+1. **Spam Prevention**: Prevents automated bot registrations
+2. **Business Verification**: Ensures registrants are legitimate business clients
+3. **Quality Control**: Allows admins to verify contact information before activation
+4. **Security**: Prevents malicious actors from accessing the system
+
+<Note>
+  This validation requirement only applies to client accounts. Employee accounts are created directly by admins and are immediately active.
+</Note>
+
+## Account Status Flags
+
+Two boolean fields in the `users` table control account access:
+
+### `is_active`
+
+Determines whether the user can log in:
+
+```python
+if not user.is_active:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Cuenta pendiente de validación por el administrador.",
+    )
+```
+
+Reference: `be/app/services/auth_service.py:89-93`
+
+- **New clients**: `false`
+- **Validated clients**: `true`
+- **Employees**: `true` (from creation)
+- **Admins**: `true` (from creation)
+
+### `is_validated`
+
+Tracks whether an admin has reviewed the account:
+
+- **New clients**: `false`
+- **Validated clients**: `true`
+- **Employees**: `true` (pre-validated by creating admin)
+- **Admins**: `true` (created manually)
+
+<Warning>
+  Both `is_active` and `is_validated` must be `true` for a client to successfully log in. The `is_active` flag is checked at login, while `is_validated` provides an audit trail.
+</Warning>
+
+## Validation Workflow
+
+<Steps>
+  <Step title="Client registers and waits">
+    After completing registration, the client sees:
+    
+    ```
+    "Cuenta creada exitosamente. Pendiente de validación por el administrador."
+    ```
+    
+    The client **cannot log in** at this point. Any login attempt will result in:
+    
+    **Response**: `403 Forbidden`
+    ```json
+    {
+      "detail": "Cuenta pendiente de validación por el administrador."
+    }
+    ```
+  </Step>
+  
+  <Step title="Admin views pending validations">
+    The administrator logs into the admin dashboard and navigates to the "Pending Validations" section.
+    
+    This section displays all users where:
+    ```python
+    is_active == False AND is_validated == False AND role_name == "client"
+    ```
+    
+    The list shows:
+    - Full name
+    - Email address
+    - Phone number (if provided)
+    - Business name (if provided)
+    - Registration date
+  </Step>
+  
+  <Step title="Admin reviews account details">
+    The administrator can:
+    
+    - View the full profile information
+    - Verify email and phone number legitimacy
+    - Check if business name is provided (optional)
+    - Review registration timestamp to detect suspicious patterns
+  </Step>
+  
+  <Step title="Admin approves or rejects">
+    **Option A: Approve the account**
+    
+    The admin clicks "Approve" or "Validate", which triggers an API call to update:
+    
+    ```python
+    user.is_active = True
+    user.is_validated = True
+    user.validated_by = current_admin.id  # Admin who performed validation
+    user.validated_at = datetime.now(timezone.utc)
+    db.commit()
+    ```
+    
+    **Option B: Reject the account**
+    
+    The admin can:
+    - Delete the account entirely (hard delete)
+    - Mark it with `deleted_at` timestamp (soft delete)
+    - Leave it inactive indefinitely
+  </Step>
+  
+  <Step title="Client can now log in">
+    Once validated:
+    - `is_active=true` allows the user to pass the login check
+    - `is_validated=true` confirms admin review
+    - The client receives access to their dashboard and can place orders
+  </Step>
+</Steps>
+
+## Validation Audit Trail
+
+The `users` table includes audit fields to track who validated an account and when:
+
+| Field | Type | Purpose |
+|-------|------|----------|
+| `validated_by` | UUID | Foreign key to `users.id` of the admin who validated |
+| `validated_at` | TIMESTAMP | When the validation occurred |
+
+```sql
+SELECT 
+  u.id,
+  u.email,
+  u.full_name,
+  u.validated_at,
+  v.full_name AS validated_by_admin
+FROM users u
+LEFT JOIN users v ON u.validated_by = v.id
+WHERE u.role_name = 'client' AND u.is_validated = true;
+```
+
+Reference: `be/app/models/user.py:110-119`
+
+## Login Flow with Validation Check
+
+Here's the complete login flow showing where validation is checked:
+
+```python
+def login_user(db: Session, login_data: UserLogin) -> TokenResponse:
+    # 1. Find user by email
+    stmt = select(User).where(User.email == login_data.email)
+    user = db.execute(stmt).scalar_one_or_none()
+    
+    # 2. Verify password
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas",
+        )
+    
+    # 3. Check if account is active (VALIDATION HAPPENS HERE)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cuenta pendiente de validación por el administrador.",
+        )
+    
+    # 4. Generate tokens
+    access_token = create_access_token(data={"sub": user.email})
+    refresh_token = create_refresh_token(data={"sub": user.email})
+    
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+```
+
+Reference: `be/app/services/auth_service.py:77-101`
+
+## State Transitions
+
+### Initial State (After Registration)
+
+```
+is_active: false
+is_validated: false
+validated_by: NULL
+validated_at: NULL
+```
+
+### After Admin Approval
+
+```
+is_active: true
+is_validated: true
+validated_by: [admin_id]
+validated_at: [timestamp]
+```
+
+### If Admin Deactivates Later
+
+```
+is_active: false
+is_validated: true  (still validated, but deactivated)
+validated_by: [admin_id]
+validated_at: [timestamp]
+```
+
+<Note>
+  Deactivating an account (`is_active=false`) does not reset the validation status. This allows admins to temporarily disable accounts without losing the validation audit trail.
+</Note>
+
+## API Endpoints (To Be Implemented)
+
+The following endpoints would be needed for the admin validation workflow:
+
+### List Pending Validations
+
+```http
+GET /api/v1/admin/users/pending
+Authorization: Bearer {admin_access_token}
+```
+
+**Response**:
+```json
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "email": "cliente@ejemplo.com",
+    "full_name": "Juan Pérez",
+    "phone": "+57 300 123 4567",
+    "business_name": "Distribuidora ABC",
+    "is_active": false,
+    "is_validated": false,
+    "created_at": "2026-03-03T10:30:00Z"
+  }
+]
+```
+
+### Validate Client Account
+
+```http
+POST /api/v1/admin/users/{user_id}/validate
+Authorization: Bearer {admin_access_token}
+```
+
+**Response**:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "is_active": true,
+  "is_validated": true,
+  "validated_by": "admin-uuid-here",
+  "validated_at": "2026-03-03T14:25:00Z"
+}
+```
+
+### Reject/Delete Account
+
+```http
+DELETE /api/v1/admin/users/{user_id}
+Authorization: Bearer {admin_access_token}
+```
+
+<Warning>
+  These admin endpoints are not yet implemented in the current codebase. The validation logic exists at the login level, but the admin UI and API endpoints need to be developed.
+</Warning>
+
+## Security Considerations
+
+### Admin-Only Access
+
+Validation endpoints must be protected with role-based access control:
+
+```python
+def get_current_admin(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    if current_user.role.name != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acción permitida solo para administradores"
+        )
+    return current_user
+```
+
+### Preventing Privilege Escalation
+
+<Warning>
+  Ensure that clients cannot:
+  - Self-activate their accounts by manipulating API calls
+  - Change their `is_active` or `is_validated` flags
+  - Modify their `role_id` to become admins or employees
+  
+  All user profile update endpoints must exclude these protected fields.
+</Warning>
+
+## Database Schema Reference
+
+Relevant fields in the `users` table:
+
+| Column | Type | Default | Index | Description |
+|--------|------|---------|-------|-------------|
+| `is_active` | BOOLEAN | `false` | - | Controls login access |
+| `is_validated` | BOOLEAN | `false` | - | Tracks admin review |
+| `validated_by` | UUID | NULL | FK | Admin who validated |
+| `validated_at` | TIMESTAMP | NULL | - | When validated |
+
+Reference: `be/app/models/user.py:72-119`
+
+## Related Features
+
+- [User Registration](/features/user-registration) - How client accounts are created
+- [Employee Management](/features/employee-management) - Pre-validated employee creation
+- [Password Management](/features/password-management) - Post-validation password flows

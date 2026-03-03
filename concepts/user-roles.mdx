@@ -1,0 +1,288 @@
+---
+title: 'User Roles'
+description: 'Understanding the three user roles in CALZADO J&R: Admin, Employee, and Client'
+icon: 'users'
+---
+
+## Overview
+
+CALZADO J&R implements a role-based access control system with three distinct user types. Each role has specific permissions, workflows, and responsibilities within the system.
+
+<CardGroup cols={3}>
+  <Card title="Admin" icon="shield-halved" color="#1e40af">
+    Full system access with user management capabilities
+  </Card>
+  <Card title="Employee" icon="briefcase" color="#d97706">
+    Production workers with task-specific dashboards
+  </Card>
+  <Card title="Client" icon="user" color="#059669">
+    Customers who can place orders and track production
+  </Card>
+</CardGroup>
+
+---
+
+## Role Definitions
+
+### Administrator
+
+Administrators have complete control over the CALZADO J&R system.
+
+<Accordion title="Creation & Setup">
+  **Account Creation:**
+  - Created manually in the database using `scripts/create_admin.py`
+  - Cannot self-register through the application
+  - Can create additional admin accounts
+
+  **Initial Setup:**
+  ```bash
+  # Run inside the backend container
+  docker compose exec be python scripts/create_admin.py
+  ```
+</Accordion>
+
+<Accordion title="Permissions & Capabilities">
+  Administrators can:
+  - **User Management:**
+    - Validate client accounts
+    - Create employee accounts
+    - Create additional admin accounts
+  - **System Access:**
+    - Full access to all system features
+    - View all orders, inventory, and production data
+  - **Data Management:**
+    - Manage inventory of materials and products
+    - Assign tasks to employees
+    - Override system configurations
+</Accordion>
+
+<Accordion title="Workflow">
+  1. Account created manually via database script
+  2. Login with credentials (account is `is_active=True` and `is_validated=True` by default)
+  3. Access administrative dashboard
+  4. Manage users, validate clients, create employees
+  5. Monitor overall system operations
+</Accordion>
+
+<Info>
+**Database Fields:** Admins have `role_id` pointing to the "admin" role in the `roles` table. They are created with `is_active=True` and `is_validated=True`.
+</Info>
+
+---
+
+### Employee
+
+Employees are production workers who cannot self-register and receive their credentials from administrators.
+
+<Accordion title="Creation & Setup">
+  **Account Creation:**
+  - **Cannot self-register** - accounts created ONLY by administrators
+  - System generates a secure temporary password
+  - Credentials sent via email to the employee
+  - Account created with `must_change_password=True`
+
+  **Required Fields:**
+  - Full name (nombres y apellidos)
+  - Phone number
+  - Email address
+  - Occupation (see below)
+</Accordion>
+
+<Accordion title="Occupations">
+  Employees are assigned one of four production roles:
+
+  | Occupation | Description |
+  |------------|-------------|
+  | **Guarnición** | Upper assembly and stitching |
+  | **Solador** | Sole attachment and bonding |
+  | **Cortador** | Material cutting and preparation |
+  | **Emplantillador** | Insole and template creation |
+
+  The occupation is stored in the `occupation` field in the `users` table.
+</Accordion>
+
+<Accordion title="Permissions & Capabilities">
+  Employees can:
+  - View their assigned tasks dashboard
+  - Update task status and progress
+  - View production schedules
+  - Access materials inventory relevant to their role
+  - Update their profile information
+</Accordion>
+
+<Accordion title="Workflow">
+  1. **Admin creates account** → System generates temporary password
+  2. **Email sent** → Employee receives credentials
+  3. **First login** → Must use temporary password
+  4. **Forced password change** → System requires new password before dashboard access
+  5. **Dashboard access** → View and manage assigned tasks
+</Accordion>
+
+<Warning>
+Employees must change their password on first login. The system checks the `must_change_password` flag and blocks access until a new password is set.
+</Warning>
+
+---
+
+### Client
+
+Clients are customers who can register freely but require admin validation before accessing the system.
+
+<Accordion title="Registration & Validation">
+  **Self-Registration:**
+  - Can register through the public registration form
+  - Account created with `is_active=False` and `is_validated=False`
+  - Receives confirmation message: "Account created successfully. Pending validation by administrator"
+
+  **Required Fields:**
+  - Full name (nombres y apellidos)
+  - Phone number
+  - Email address
+  - Password
+  - Business name (optional)
+
+  **Validation Process:**
+  1. Client submits registration form
+  2. Account created in pending state
+  3. Admin reviews and validates the account
+  4. System sets `is_active=True` and `is_validated=True`
+  5. Client can now login
+</Accordion>
+
+<Accordion title="Permissions & Capabilities">
+  Validated clients can:
+  - Browse product catalog
+  - Place new orders
+  - Track order status and production progress
+  - View order history
+  - Update profile and business information
+  - Contact support
+</Accordion>
+
+<Accordion title="Workflow">
+  1. **Register** via public form (`/api/v1/auth/register`)
+  2. **Wait for validation** → Account pending admin approval
+  3. **Admin validates** → Account activated
+  4. **Login** → Access client dashboard
+  5. **Place orders** → Browse catalog and submit orders
+  6. **Track production** → Monitor order progress
+</Accordion>
+
+<Info>
+**Business Name Field:** Clients can optionally provide a `business_name` for commercial accounts. This field is stored in the `users` table and is `NULL` for individual customers.
+</Info>
+
+---
+
+## Role Comparison
+
+<CardGroup cols={2}>
+  <Card title="Can Self-Register" icon="user-plus">
+    - **Admin:** No (manual creation)
+    - **Employee:** No (admin creates)
+    - **Client:** Yes (public form)
+  </Card>
+  <Card title="Initial Account State" icon="toggle-on">
+    - **Admin:** Active & validated
+    - **Employee:** Active, validated, must change password
+    - **Client:** Inactive, pending validation
+  </Card>
+  <Card title="Access Level" icon="lock">
+    - **Admin:** Full system access
+    - **Employee:** Task dashboard only
+    - **Client:** Order & catalog access
+  </Card>
+  <Card title="Can Create Users" icon="user-check">
+    - **Admin:** Yes (all roles)
+    - **Employee:** No
+    - **Client:** No
+  </Card>
+</CardGroup>
+
+---
+
+## Database Schema Reference
+
+Roles are stored in two tables:
+
+### `roles` Table
+
+```sql
+CREATE TABLE roles (
+  id UUID PRIMARY KEY,
+  name VARCHAR(50) UNIQUE NOT NULL,  -- 'admin', 'employee', 'client'
+  description VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE,
+  updated_at TIMESTAMP WITH TIME ZONE,
+  deleted_at TIMESTAMP WITH TIME ZONE  -- Soft delete
+);
+```
+
+### `users` Table (Role-Related Fields)
+
+```sql
+role_id UUID REFERENCES roles(id) NOT NULL,
+is_active BOOLEAN DEFAULT FALSE,
+is_validated BOOLEAN DEFAULT FALSE,
+must_change_password BOOLEAN DEFAULT FALSE,
+business_name VARCHAR(255),        -- Clients only
+occupation VARCHAR(100),           -- Employees only
+validated_by UUID REFERENCES users(id),
+validated_at TIMESTAMP WITH TIME ZONE
+```
+
+See the [Database Schema](/concepts/database-schema) page for complete table definitions.
+
+---
+
+## Implementation Details
+
+<CodeGroup>
+```python app/models/user.py
+class User(Base):
+    __tablename__ = "users"
+    
+    # Role relationship
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("roles.id"),
+        nullable=False,
+    )
+    role = relationship("Role", lazy="selectin")
+    
+    # Account state flags
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_validated: Mapped[bool] = mapped_column(Boolean, default=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Role-specific fields
+    business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Clients
+    occupation: Mapped[str | None] = mapped_column(String(100), nullable=True)     # Employees
+```
+
+```python app/services/auth_service.py
+def register_user(db: Session, user_data: UserCreate) -> User:
+    """Registers a new client with inactive/unvalidated state."""
+    client_role = db.execute(select(Role).where(Role.name == "client")).scalar_one()
+    
+    new_user = User(
+        email=user_data.email,
+        full_name=user_data.full_name,
+        hashed_password=hash_password(user_data.password),
+        role_id=client_role.id,
+        is_active=False,        # Pending validation
+        is_validated=False,     # Admin must approve
+    )
+    db.add(new_user)
+    db.commit()
+    return new_user
+```
+</CodeGroup>
+
+<Check>
+**Source Files:**
+- Role model: `be/app/models/role.py`
+- User model: `be/app/models/user.py`
+- Registration logic: `be/app/services/auth_service.py:35`
+- Admin creation: `be/scripts/create_admin.py`
+</Check>

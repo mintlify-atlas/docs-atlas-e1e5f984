@@ -1,0 +1,474 @@
+---
+title: Docker Setup
+description: Run CALZADO J&R using Docker Compose for a complete development environment
+icon: docker
+---
+
+## Overview
+
+Docker Compose orchestrates all three services (PostgreSQL, Backend, and Frontend) of CALZADO J&R with a single command. This eliminates the need for local installations of Python, Node.js, or PostgreSQL.
+
+<Info>
+**What is Docker Compose?**
+
+Docker Compose is a tool that defines and runs multi-container applications. A single `docker-compose.yml` file describes all services, their relationships, and configuration. One command launches everything in the correct order.
+</Info>
+
+## Prerequisites
+
+Ensure you have the following tools installed:
+
+| Tool | Minimum Version | Check Command |
+|------|----------------|---------------|
+| **Docker** | 24+ | `docker --version` |
+| **Docker Compose** | 2.20+ | `docker compose version` |
+
+<Note>
+Docker Desktop for Mac and Windows includes Docker Compose by default.
+</Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone <repository-url>
+    cd calzado-jyr
+    ```
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Copy the environment template and edit with your real values:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    **Required changes** before starting:
+
+    <ParamField path="POSTGRES_PASSWORD" type="string" required>
+      PostgreSQL database password. Never leave the default value.
+      
+      ```bash
+      # Generate a secure password
+      openssl rand -base64 24
+      ```
+    </ParamField>
+
+    <ParamField path="SECRET_KEY" type="string" required>
+      Secret key for signing JWT tokens. Must be changed in all environments.
+      
+      ```bash
+      # Generate a secure key
+      python -c "import secrets; print(secrets.token_urlsafe(48))"
+      ```
+    </ParamField>
+
+    <ParamField path="MAIL_PASSWORD" type="string" required>
+      SMTP application password for sending emails (employee credentials, password resets).
+    </ParamField>
+
+    <Warning>
+    **Why `.env` and not editing `docker-compose.yml` directly?**
+    
+    The `docker-compose.yml` file is version-controlled in git. If you put passwords there, they'll be exposed in the commit history. The `.env` file is in `.gitignore` and **never** reaches the repository.
+    </Warning>
+  </Step>
+
+  <Step title="Start the Stack">
+    Build the images and start all three services in the background:
+
+    ```bash
+    docker compose up -d --build
+    ```
+
+    The `--build` flag is needed on first run to build Docker images from Dockerfiles. Subsequent runs can omit it if code hasn't changed:
+
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+
+  <Step title="Verify Services">
+    Check that all services are running:
+
+    ```bash
+    docker compose ps
+    ```
+
+    You should see three containers:
+    - `calzado_jyr_db` (PostgreSQL)
+    - `calzado_jyr_be` (Backend API)
+    - `calzado_jyr_fe` (Frontend)
+
+    View logs in real-time:
+
+    ```bash
+    # All services
+    docker compose logs -f
+
+    # Backend only
+    docker compose logs -f be
+
+    # Frontend only
+    docker compose logs -f fe
+    ```
+  </Step>
+
+  <Step title="Create Initial Admin User">
+    Execute the admin creation script inside the backend container:
+
+    ```bash
+    docker compose exec be python scripts/create_admin.py
+    ```
+
+    This creates the first administrator account:
+    - **Email:** `admin@calzadojyr.com`
+    - **Password:** `Admin123!`
+
+    <Warning>
+    Change this password immediately after first login.
+    </Warning>
+
+    <Info>
+    **What does `docker compose exec` do?**
+    
+    It executes a command inside a running container. `be` is the service name from `docker-compose.yml`. The `create_admin.py` script creates the first admin user directly in the database.
+    </Info>
+  </Step>
+
+  <Step title="Access the Application">
+    Once running, services are available at:
+
+    | Service | URL | Description |
+    |---------|-----|-------------|
+    | **Frontend** | http://localhost:5173 | React interface |
+    | **Backend API** | http://localhost:8000 | FastAPI REST API |
+    | **API Documentation** | http://localhost:8000/docs | Interactive Swagger UI |
+    | **PostgreSQL** | localhost:5432 | Direct connection (DB tools) |
+  </Step>
+</Steps>
+
+## Service Architecture
+
+### Database Service (db)
+
+```yaml
+service: db
+image: postgres:17-alpine
+port: 5432
+volume: calzado_jyr_data (persistent)
+```
+
+**Key Features:**
+- **Alpine Image**: Minimal size (~10 MB vs ~200 MB full image)
+- **Persistent Storage**: Data survives `docker compose down`
+- **Healthcheck**: Blocks backend startup until PostgreSQL is ready
+- **Initialization Scripts**: Automatically runs SQL scripts from `db/init/` on first start
+
+**Healthcheck Configuration:**
+```yaml
+healthcheck:
+  test: pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 15s
+```
+
+The healthcheck prevents "connection refused" errors by ensuring PostgreSQL is accepting connections before the backend starts.
+
+### Backend Service (be)
+
+```yaml
+service: be
+build: ./be (multi-stage Dockerfile)
+target: dev
+port: 8000
+depends_on: db (with health check)
+```
+
+**Key Features:**
+- **Hot Reload**: Code changes restart the server automatically (~1 second)
+- **Volume Mounting**: `./be:/app` syncs local code with container
+- **Service Dependency**: Waits for database `service_healthy` status
+- **Internal Networking**: Communicates with database via service name `db`
+
+**Why "db" as host instead of "localhost"?**
+
+Inside the Docker network, services communicate by their service name. `db` resolves to the database container's internal IP. `localhost` would refer to the backend container itself, not the database.
+
+### Frontend Service (fe)
+
+```yaml
+service: fe
+build: ./fe (multi-stage Dockerfile)
+target: dev
+port: 5173
+depends_on: be
+```
+
+**Key Features:**
+- **Vite HMR**: Hot Module Replacement updates browser in milliseconds
+- **Volume Mounting**: `./fe:/app` syncs local code with container
+- **Protected node_modules**: Anonymous volume prevents host from overwriting installed dependencies
+
+**Why the anonymous volume for node_modules?**
+
+```yaml
+volumes:
+  - ./fe:/app
+  - /app/node_modules  # Anonymous volume
+```
+
+The `./fe:/app` mount syncs the host directory into the container. If `node_modules` doesn't exist on the host, Docker creates an empty directory that would overwrite the packages installed during the image build. The anonymous volume "protects" `node_modules` from this override.
+
+## Networking
+
+### Private Bridge Network
+
+```yaml
+networks:
+  calzado_jyr_net:
+    driver: bridge
+```
+
+All services run in an isolated bridge network:
+- **Internal Communication**: Services use service names (`db`, `be`, `fe`) as hostnames
+- **External Access**: Only exposed ports are accessible from the host
+- **Security**: Database is not accessible from the internet, only from backend
+
+**Port Mapping:**
+```yaml
+ports:
+  - "5432:5432"  # host:container
+```
+
+Format is `host_port:container_port`. The container always uses the right-side port internally. The left-side port is what you use from your local machine.
+
+## Persistent Storage
+
+### Named Volume
+
+```yaml
+volumes:
+  calzado_jyr_data:
+```
+
+The database uses a named volume managed by Docker:
+- **Persistent**: Data survives `docker compose down`
+- **Ephemeral with -v**: `docker compose down -v` deletes all data (useful for reset)
+- **Location**: Docker manages storage location (usually `/var/lib/docker/volumes/`)
+
+**Data Lifecycle:**
+
+| Command | Data Status |
+|---------|-------------|
+| `docker compose down` | Data **preserved** |
+| `docker compose down -v` | Data **deleted** (full reset) |
+| `docker compose up` | Reuses existing data |
+
+## Common Commands
+
+### Daily Development
+
+```bash
+# Start all services
+docker compose up -d
+
+# Stop all services (preserve data)
+docker compose down
+
+# Restart a specific service
+docker compose restart be
+
+# View logs
+docker compose logs -f
+
+# Check resource usage
+docker stats
+```
+
+### Building & Rebuilding
+
+```bash
+# Rebuild all images
+docker compose build
+
+# Rebuild specific service (e.g., after changing requirements.txt)
+docker compose build be
+
+# Start with fresh build
+docker compose up -d --build
+```
+
+### Database Operations
+
+```bash
+# Connect to PostgreSQL shell
+docker compose exec db psql -U jyr_user -d calzado_jyr_db
+
+# Run backend script (e.g., create admin)
+docker compose exec be python scripts/create_admin.py
+
+# Database backup
+docker compose exec db pg_dump -U jyr_user calzado_jyr_db > backup.sql
+```
+
+### Cleanup & Reset
+
+```bash
+# Stop and remove containers (keeps data)
+docker compose down
+
+# Complete reset (deletes database)
+docker compose down -v
+
+# Remove all images
+docker compose down --rmi all
+
+# Clean all Docker resources (use with caution)
+docker system prune -a
+```
+
+### Debugging
+
+```bash
+# Enter backend container shell
+docker compose exec be /bin/bash
+
+# Enter database container shell
+docker compose exec db /bin/sh
+
+# Check service health
+docker compose ps
+
+# Inspect network
+docker network inspect calzado-jyr_calzado_jyr_net
+
+# View container details
+docker inspect calzado_jyr_be
+```
+
+## Troubleshooting
+
+### Port Already in Use
+
+**Error:** `Bind for 0.0.0.0:5432 failed: port is already allocated`
+
+**Solution:** Change the port in `.env`:
+```bash
+DB_PORT=5433  # or any available port
+BE_PORT=8001
+FE_PORT=5174
+```
+
+### Database Connection Refused
+
+**Error:** Backend shows `connection refused` to database
+
+**Cause:** Backend started before database was ready
+
+**Solution:** The healthcheck should prevent this. If it still occurs:
+```bash
+docker compose down
+docker compose up -d
+```
+
+### Hot Reload Not Working
+
+**Issue:** Code changes don't trigger restart
+
+**Solutions:**
+1. Verify volume is mounted: `docker compose config` should show `./be:/app`
+2. Restart the service: `docker compose restart be`
+3. Check file permissions (especially on Windows/WSL)
+
+### Permission Errors
+
+**Issue:** Cannot write to volumes or files
+
+**Solution:** On Linux, files created by containers may have root ownership:
+```bash
+# Fix ownership
+sudo chown -R $USER:$USER ./be ./fe
+```
+
+### Out of Disk Space
+
+**Issue:** Docker images and volumes consuming too much space
+
+**Solution:**
+```bash
+# Check Docker disk usage
+docker system df
+
+# Remove unused images, containers, and networks
+docker system prune
+
+# Remove unused volumes (will delete data!)
+docker volume prune
+```
+
+## Multi-Stage Dockerfiles
+
+### Backend Dockerfile
+
+The backend uses a multi-stage build:
+
+```dockerfile
+FROM python:3.12-slim AS base
+# Install dependencies
+
+FROM base AS dev
+# Development with hot reload
+CMD ["uvicorn", "app.main:app", "--reload"]
+
+FROM base AS prod
+# Production with multiple workers
+CMD ["uvicorn", "app.main:app", "--workers", "2"]
+```
+
+**Stages:**
+- **base**: Installs Python dependencies (cached)
+- **dev**: Development target with `--reload` (used in docker-compose.yml)
+- **prod**: Production target with multiple workers (for deployment)
+
+### Frontend Dockerfile
+
+The frontend uses a four-stage build:
+
+```dockerfile
+FROM node:20-alpine AS base
+# Install dependencies
+
+FROM base AS dev
+# Development with Vite HMR
+
+FROM base AS builder
+# Compile TypeScript + build assets
+
+FROM nginx:stable-alpine AS prod
+# Serve static files with nginx (~15 MB final image)
+```
+
+**Stages:**
+- **base**: Installs pnpm and node_modules (cached)
+- **dev**: Development server with HMR (used in docker-compose.yml)
+- **builder**: Compiles production build
+- **prod**: Serves static files with nginx (for deployment)
+
+## Environment Variables
+
+See the [Environment Variables](/setup/environment-variables) page for a complete reference of all configuration options.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="code" href="/setup/local-development">
+    Run without Docker for development
+  </Card>
+  <Card title="Environment Variables" icon="key" href="/setup/environment-variables">
+    Configure all system variables
+  </Card>
+</CardGroup>

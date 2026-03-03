@@ -1,0 +1,738 @@
+---
+title: Frontend
+description: React 19 + TypeScript + Vite application with TailwindCSS 4 styling
+icon: browser
+---
+
+## Technology Stack
+
+<CardGroup cols={2}>
+  <Card title="UI Library" icon="react">
+    **React 19.2**
+    
+    Latest React with improved hooks and concurrent features
+  </Card>
+  <Card title="Build Tool" icon="bolt">
+    **Vite 7.2**
+    
+    Lightning-fast HMR and optimized production builds
+  </Card>
+  <Card title="Type Safety" icon="code">
+    **TypeScript 5.9**
+    
+    Static typing for better developer experience
+  </Card>
+  <Card title="Styling" icon="paintbrush">
+    **TailwindCSS 4.1**
+    
+    Utility-first CSS with custom theme configuration
+  </Card>
+  <Card title="Routing" icon="route">
+    **React Router 7.13**
+    
+    Client-side routing with protected routes
+  </Card>
+  <Card title="HTTP Client" icon="globe">
+    **Axios 1.13**
+    
+    Promise-based HTTP client with interceptors
+  </Card>
+</CardGroup>
+
+---
+
+## Project Structure
+
+```
+fe/
+├── Dockerfile
+├── nginx.conf             # Production nginx configuration
+├── package.json
+├── vite.config.ts         # Vite & Vitest configuration
+├── tailwind.config.js     # TailwindCSS theme
+├── tsconfig.json          # TypeScript configuration
+├── public/                # Static assets
+└── src/
+    ├── main.tsx           # React app entry point
+    ├── App.tsx            # Root component with routing
+    ├── index.css          # Global styles + Tailwind
+    ├── vite-env.d.ts      # Vite type definitions
+    ├── types/             # TypeScript type definitions
+    │   └── auth.ts
+    ├── api/               # HTTP client configuration
+    │   ├── axios.ts       # Axios instance with interceptors
+    │   └── auth.ts        # Auth API calls
+    ├── context/           # React Context providers
+    │   ├── AuthContext.tsx
+    │   └── authContextDef.ts
+    ├── hooks/             # Custom React hooks
+    │   └── useAuth.ts
+    ├── components/        # Reusable components
+    │   ├── ProtectedRoute.tsx
+    │   ├── layout/
+    │   │   ├── AppLayout.tsx
+    │   │   └── Header.tsx
+    │   └── ui/
+    │       ├── Alert.tsx
+    │       ├── Button.tsx
+    │       ├── InputField.tsx
+    │       └── TermsModal.tsx
+    └── pages/             # Page components
+        ├── LoginPage.tsx
+        ├── RegisterPage.tsx
+        ├── DashboardPage.tsx
+        ├── ChangePasswordPage.tsx
+        ├── ForgotPasswordPage.tsx
+        └── ResetPasswordPage.tsx
+```
+
+---
+
+## Vite Configuration
+
+### `vite.config.ts`
+
+```typescript vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  
+  server: {
+    port: 5173,
+    host: "0.0.0.0",
+    open: false,
+    watch: {
+      // Polling for Docker on Windows (inotify doesn't work)
+      usePolling: true,
+      interval: 500,
+    },
+  },
+});
+```
+
+<AccordionGroup>
+  <Accordion title="Path Aliases" icon="link">
+    The `@` alias maps to `./src`, allowing clean imports:
+    
+    ```typescript
+    // Instead of:
+    import { useAuth } from "../../../hooks/useAuth";
+    
+    // Use:
+    import { useAuth } from "@/hooks/useAuth";
+    ```
+  </Accordion>
+  
+  <Accordion title="Hot Module Replacement" icon="fire">
+    Vite's HMR updates the browser instantly when you save files:
+    
+    - Component changes: Updates without full page reload
+    - CSS changes: Applies styles immediately
+    - State preservation: Maintains React state during updates
+    
+    **In Docker:** `usePolling: true` enables file watching on Windows hosts where inotify doesn't work.
+  </Accordion>
+  
+  <Accordion title="TailwindCSS Plugin" icon="paintbrush">
+    The `@tailwindcss/vite` plugin integrates TailwindCSS 4 directly into Vite:
+    
+    ```typescript
+    import tailwindcss from "@tailwindcss/vite";
+    
+    plugins: [react(), tailwindcss()]
+    ```
+    
+    No separate PostCSS configuration needed.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Application Entry Point
+
+### `src/main.tsx`
+
+```typescript src/main.tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App.tsx";
+import "./index.css";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
+```
+
+### `src/App.tsx` - Router Configuration
+
+```typescript src/App.tsx
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "@/context/AuthContext";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AppLayout } from "@/components/layout/AppLayout";
+
+import { LoginPage } from "@/pages/LoginPage";
+import { RegisterPage } from "@/pages/RegisterPage";
+import { DashboardPage } from "@/pages/DashboardPage";
+import { ChangePasswordPage } from "@/pages/ChangePasswordPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+
+          {/* Protected routes */}
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/change-password" element={<ChangePasswordPage />} />
+          </Route>
+
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+export default App;
+```
+
+**Routing structure:**
+
+<Steps>
+  <Step title="Public Routes">
+    Accessible without authentication:
+    - `/login` - Login page
+    - `/register` - Client registration
+    - `/forgot-password` - Password recovery request
+    - `/reset-password` - Password reset with token
+  </Step>
+  
+  <Step title="Protected Routes">
+    Wrapped in `<ProtectedRoute>` and `<AppLayout>`:
+    - `/dashboard` - Role-based dashboard
+    - `/change-password` - Change password
+    
+    Automatically redirects to `/login` if not authenticated.
+  </Step>
+  
+  <Step title="Default & Fallback">
+    - `/` redirects to `/login`
+    - `*` (404) redirects to `/login`
+  </Step>
+</Steps>
+
+---
+
+## Component Architecture
+
+### Pages
+
+Page components represent full routes:
+
+```
+pages/
+├── LoginPage.tsx          # User authentication
+├── RegisterPage.tsx       # Client registration form
+├── DashboardPage.tsx      # Role-based dashboard
+├── ChangePasswordPage.tsx # Password change form
+├── ForgotPasswordPage.tsx # Request password reset
+└── ResetPasswordPage.tsx  # Reset with token
+```
+
+### Reusable Components
+
+#### UI Components (`components/ui/`)
+
+```
+ui/
+├── Alert.tsx       # Toast notifications
+├── Button.tsx      # Styled button with variants
+├── InputField.tsx  # Form input with validation
+└── TermsModal.tsx  # Terms & conditions modal
+```
+
+#### Layout Components (`components/layout/`)
+
+```
+layout/
+├── AppLayout.tsx   # Main layout with header + outlet
+└── Header.tsx      # Navigation header
+```
+
+#### Route Protection
+
+```typescript components/ProtectedRoute.tsx
+import { Navigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+}
+
+export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+```
+
+---
+
+## State Management
+
+### Auth Context
+
+```typescript context/AuthContext.tsx
+import { createContext, useState, useEffect, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { authAPI } from "@/api/auth";
+import type { User, LoginCredentials } from "@/types/auth";
+
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (credentials: LoginCredentials) => Promise<void>;
+  logout: () => void;
+  refreshUser: () => Promise<void>;
+}
+
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check for existing session on mount
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      refreshUser();
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const login = async (credentials: LoginCredentials) => {
+    const response = await authAPI.login(credentials);
+    localStorage.setItem("access_token", response.access_token);
+    localStorage.setItem("refresh_token", response.refresh_token);
+    setUser(response.user);
+    navigate("/dashboard");
+  };
+
+  const logout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    setUser(null);
+    navigate("/login");
+  };
+
+  const refreshUser = async () => {
+    try {
+      const userData = await authAPI.getCurrentUser();
+      setUser(userData);
+    } catch (error) {
+      logout();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+```
+
+### Custom Hook
+
+```typescript hooks/useAuth.ts
+import { useContext } from "react";
+import { AuthContext } from "@/context/AuthContext";
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+};
+```
+
+---
+
+## HTTP Client
+
+### Axios Configuration
+
+```typescript api/axios.ts
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+const apiClient = axios.create({
+  baseURL: API_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+// Request interceptor: Add JWT token
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor: Handle 401 and refresh token
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        const refreshToken = localStorage.getItem("refresh_token");
+        const response = await axios.post(`${API_URL}/api/v1/auth/refresh`, {
+          refresh_token: refreshToken,
+        });
+
+        const { access_token } = response.data;
+        localStorage.setItem("access_token", access_token);
+
+        originalRequest.headers.Authorization = `Bearer ${access_token}`;
+        return apiClient(originalRequest);
+      } catch (refreshError) {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        window.location.href = "/login";
+        return Promise.reject(refreshError);
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+export default apiClient;
+```
+
+<AccordionGroup>
+  <Accordion title="Request Interceptor" icon="arrow-up">
+    Automatically adds JWT token to all requests:
+    
+    ```typescript
+    Authorization: Bearer <access_token>
+    ```
+  </Accordion>
+  
+  <Accordion title="Response Interceptor" icon="arrow-down">
+    Handles 401 Unauthorized responses:
+    
+    1. Detects expired access token
+    2. Attempts to refresh using refresh token
+    3. Retries original request with new token
+    4. If refresh fails, redirects to login
+  </Accordion>
+  
+  <Accordion title="Environment Variables" icon="gear">
+    Vite exposes environment variables prefixed with `VITE_`:
+    
+    ```bash .env
+    VITE_API_URL=http://localhost:8000
+    ```
+    
+    Access in code:
+    ```typescript
+    import.meta.env.VITE_API_URL
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Styling with TailwindCSS 4
+
+### `src/index.css`
+
+```css src/index.css
+@import "tailwindcss";
+
+/* Custom theme variables */
+@theme {
+  --color-primary: #1e40af;        /* Navy blue */
+  --color-primary-dark: #1e3a8a;
+  --color-primary-light: #3b82f6;
+  --color-secondary: #d97706;      /* Golden */
+  --color-secondary-dark: #b45309;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom animations */
+@keyframes shimmer {
+  0% { transform: translateX(-100%) skewX(-15deg); }
+  100% { transform: translateX(200%) skewX(-15deg); }
+}
+
+.btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-shimmer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 215, 0, 0.4),
+    rgba(218, 165, 32, 0.3),
+    rgba(255, 215, 0, 0.4),
+    transparent
+  );
+  transform: translateX(-100%) skewX(-15deg);
+}
+
+.btn-shimmer:hover::after {
+  animation: shimmer 0.6s ease-in-out;
+}
+```
+
+### Brand Colors
+
+<CardGroup cols={2}>
+  <Card title="Primary" icon="circle" color="#1e40af">
+    **Navy Blue** `#1e40af`
+    
+    Inspired by the eagle in the logo
+  </Card>
+  <Card title="Secondary" icon="circle" color="#d97706">
+    **Golden** `#d97706`
+    
+    From the J&R text in the logo
+  </Card>
+</CardGroup>
+
+**Usage:**
+
+```tsx
+<button className="bg-[--color-primary] hover:bg-[--color-primary-dark]">
+  Primary Button
+</button>
+
+<button className="bg-[--color-secondary] hover:bg-[--color-secondary-dark]">
+  Secondary Button
+</button>
+```
+
+---
+
+## TypeScript Configuration
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Path mapping */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
+```
+
+---
+
+## Dependencies
+
+From `package.json`:
+
+```json package.json
+{
+  "dependencies": {
+    "axios": "^1.13.4",
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.13.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  }
+}
+```
+
+---
+
+## Running the Frontend
+
+<CodeGroup>
+```bash Docker (Recommended)
+# Start frontend with Docker Compose
+docker compose up -d fe
+
+# View logs
+docker compose logs -f fe
+
+# Vite HMR is enabled - edit components and see changes instantly
+```
+
+```bash Local Development
+# Install dependencies
+cd fe
+npm install
+
+# Create .env file
+cp .env.example .env
+# Edit VITE_API_URL if needed
+
+# Run dev server
+npm run dev
+
+# Open http://localhost:5173
+```
+</CodeGroup>
+
+### Available Scripts
+
+```json package.json
+{
+  "scripts": {
+    "dev": "vite",                          // Start dev server
+    "build": "tsc -b && vite build",       // Production build
+    "preview": "vite preview",             // Preview production build
+    "lint": "eslint .",                    // Run ESLint
+    "format": "prettier --write \"src/**/*\"",  // Format code
+    "test": "vitest run",                  // Run tests
+    "test:watch": "vitest",                // Watch mode
+    "test:coverage": "vitest run --coverage" // Coverage report
+  }
+}
+```
+
+---
+
+## Production Build
+
+### Build Process
+
+```bash
+# TypeScript compilation + Vite build
+npm run build
+
+# Output: dist/
+# ├── index.html
+# ├── assets/
+# │   ├── index-[hash].js
+# │   └── index-[hash].css
+# └── ...
+```
+
+### Nginx Configuration
+
+In production, the frontend is served by nginx:
+
+```nginx nginx.conf
+server {
+  listen 80;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # SPA routing - all routes serve index.html
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # Cache static assets
+  location /assets/ {
+    expires 1y;
+    add_header Cache-Control "public, immutable";
+  }
+}
+```
+
+<Tip>
+  The `try_files` directive ensures React Router works correctly by serving `index.html` for all routes instead of returning 404.
+</Tip>

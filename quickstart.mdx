@@ -1,80 +1,413 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get CALZADO J&R running in under 5 minutes using Docker Compose
 ---
 
-## Get started in three steps
+## Get Up and Running in 5 Minutes
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide will have you running the complete CALZADO J&R system (database, backend, and frontend) in under 5 minutes using Docker Compose.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Docker Compose orchestrates all three services (PostgreSQL, FastAPI, React) with a single command. No manual database configuration required!
 </Note>
+
+## Prerequisites
+
+Before starting, ensure you have these tools installed:
+
+| Tool | Minimum Version | Check Command |
+|------|----------------|---------------|
+| **Docker** | 24+ | `docker --version` |
+| **Docker Compose** | 2.20+ | `docker compose version` |
+| **Git** | Any recent version | `git --version` |
+
+<Warning>
+Make sure Docker Desktop is running before executing any commands. On Linux, ensure the Docker daemon is active with `sudo systemctl status docker`.
+</Warning>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the CALZADO J&R repository to your local machine:
+
+    ```bash
+    git clone <repository-url>
+    cd calzado-jyr
+    ```
+
+    <Tip>
+    Replace `<repository-url>` with your actual Git repository URL.
+    </Tip>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Copy the environment template and configure your settings:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Open `.env` in your text editor and update these **mandatory** fields:
+
+    | Variable | Default Value | Action Required |
+    |----------|---------------|----------------|
+    | `POSTGRES_PASSWORD` | `cambia_esta_contrasena_segura` | Change to a strong password |
+    | `SECRET_KEY` | `CAMBIA_ESTO_...` | Generate with command below |
+    | `MAIL_PASSWORD` | `tu_contrasena_de_app_smtp` | Add your SMTP app password |
+
+    <CodeGroup>
+    ```bash Generate SECRET_KEY
+    python -c "import secrets; print(secrets.token_urlsafe(48))"
+    ```
+
+    ```bash Alternative: OpenSSL
+    openssl rand -base64 48
+    ```
+    </CodeGroup>
+
+    Copy the generated key and paste it as the value for `SECRET_KEY` in your `.env` file.
+
+    <Warning>
+    **Never commit the `.env` file to version control.** It's already in `.gitignore` - keep it that way. This file contains sensitive credentials.
+    </Warning>
+
+    ### Why .env Instead of docker-compose.yml?
+
+    The `docker-compose.yml` file is tracked in Git. If you put passwords directly in it, they become part of your commit history forever. The `.env` file is git-ignored and keeps your secrets safe.
+  </Step>
+
+  <Step title="Launch the Complete Stack">
+    Build the Docker images and start all three services:
+
+    ```bash
+    docker compose up -d --build
+    ```
+
+    <Note>
+    **What does `--build` do?** It constructs the Docker images from the Dockerfiles before starting containers. On first run, this is required. Subsequent runs can omit `--build` if code hasn't changed.
+    </Note>
+
+    Verify all services are running:
+
+    ```bash
+    docker compose ps
+    ```
+
+    You should see three services: `calzado_jyr_db`, `calzado_jyr_be`, and `calzado_jyr_fe` with status "Up".
+
+    ### View Logs
+
+    <CodeGroup>
+    ```bash All Services
+    docker compose logs -f
+    ```
+
+    ```bash Backend Only
+    docker compose logs -f be
+    ```
+
+    ```bash Frontend Only
+    docker compose logs -f fe
+    ```
+
+    ```bash Database Only
+    docker compose logs -f db
+    ```
+    </CodeGroup>
+
+    Press `Ctrl+C` to stop following logs.
+  </Step>
+
+  <Step title="Create the First Admin User">
+    The system requires an initial administrator account. Run the admin creation script:
+
+    ```bash
+    docker compose exec be python scripts/create_admin.py
+    ```
+
+    <Note>
+    **What does `docker compose exec` do?** It executes a command inside a running container. `be` is the service name from `docker-compose.yml`.
+    </Note>
+
+    You should see:
+
+    ```
+    ✅ Administrador creado exitosamente:
+       Email: admin@calzadojyr.com
+       Contraseña: Admin123!
+       ⚠️  CAMBIA ESTA CONTRASEÑA después del primer login.
+    ```
+
+    **Default Admin Credentials:**
+    - Email: `admin@calzadojyr.com`
+    - Password: `Admin123!`
+
+    <Warning>
+    Change these credentials immediately after your first login! Default passwords are a security risk.
+    </Warning>
+  </Step>
+
+  <Step title="Access the Application">
+    All services are now running and accessible:
+
+    | Service | URL | Description |
+    |---------|-----|-------------|
+    | **Frontend** | http://localhost:5173 | React application (login, dashboards) |
+    | **Backend API** | http://localhost:8000 | FastAPI REST endpoints |
+    | **API Documentation** | http://localhost:8000/docs | Interactive Swagger UI |
+    | **PostgreSQL** | localhost:5432 | Direct database connection |
+
+    <CardGroup cols={2}>
+      <Card title="Frontend Application" icon="browser" href="http://localhost:5173">
+        Open the React UI to log in and access dashboards
+      </Card>
+      <Card title="API Documentation" icon="book" href="http://localhost:8000/docs">
+        Explore and test API endpoints with Swagger UI
+      </Card>
+    </CardGroup>
+  </Step>
+
+  <Step title="Log In and Explore">
+    Open your browser and navigate to http://localhost:5173
+
+    ### First Login
+
+    1. Enter the default admin credentials:
+       - Email: `admin@calzadojyr.com`
+       - Password: `Admin123!`
+
+    2. You'll be redirected to the **Administrator Dashboard**
+
+    3. From here you can:
+       - Validate pending client registrations
+       - Create employee accounts (system sends credentials via email)
+       - Manage inventory and products
+       - View system analytics
+       - Create additional admin accounts
+
+    <Tip>
+    The system automatically detects your role and routes you to the appropriate dashboard:
+    - **Admin** → Administrative dashboard
+    - **Employee** → Task management dashboard  
+    - **Client** → Order and catalog dashboard
+    </Tip>
+  </Step>
+</Steps>
+
+## What Just Happened?
+
+Docker Compose orchestrated three services:
+
+1. **PostgreSQL 17** (db) - Database container
+   - Initialized with tables, roles, and indexes
+   - Data persisted in `calzado_jyr_data` volume
+   - Accessible on `localhost:5432`
+
+2. **FastAPI Backend** (be) - API container
+   - Started with `uvicorn` in development mode
+   - Hot-reload enabled (code changes auto-restart)
+   - Connected to PostgreSQL via internal network
+   - Accessible on `localhost:8000`
+
+3. **React Frontend** (fe) - UI container
+   - Started with Vite dev server
+   - Hot Module Replacement (HMR) enabled
+   - Proxies API calls to backend
+   - Accessible on `localhost:5173`
+
+All services communicate through a private Docker network (`calzado_jyr_net`) isolated from your host network.
+
+## Useful Docker Commands
+
+Here are essential commands for day-to-day development:
+
+<CodeGroup>
+```bash Stop Services
+# Stop services but keep data
+docker compose down
+```
+
+```bash Complete Reset
+# Stop services and DELETE all data (fresh start)
+docker compose down -v
+```
+
+```bash Rebuild Backend
+# After changing requirements.txt
+docker compose build be
+docker compose up -d be
+```
+
+```bash Rebuild Frontend
+# After changing package.json
+docker compose build fe
+docker compose up -d fe
+```
+
+```bash Database Shell
+# Connect to PostgreSQL CLI
+docker compose exec db psql -U jyr_user -d calzado_jyr_db
+```
+
+```bash Backend Shell
+# Access backend container bash
+docker compose exec be bash
+```
+
+```bash View Resource Usage
+# Monitor container CPU/memory
+docker stats
+```
+
+```bash Restart Single Service
+# Restart just the backend
+docker compose restart be
+```
+</CodeGroup>
+
+<Warning>
+`docker compose down -v` deletes the database volume. Use this only when you want a complete fresh start - all users, orders, and data will be lost!
+</Warning>
+
+## Testing the API
+
+The FastAPI backend provides interactive API documentation at http://localhost:8000/docs
+
+### Get an Access Token
+
+1. Navigate to http://localhost:8000/docs
+2. Find the `POST /auth/login` endpoint
+3. Click "Try it out"
+4. Enter credentials:
+   ```json
+   {
+     "email": "admin@calzadojyr.com",
+     "password": "Admin123!"
+   }
+   ```
+5. Click "Execute"
+6. Copy the `access_token` from the response
+
+### Authenticate Swagger UI
+
+1. Click the green "Authorize" button at the top
+2. Enter: `Bearer <your-access-token>`
+3. Click "Authorize"
+4. Now you can test authenticated endpoints
+
+<Tip>
+Access tokens expire after 15 minutes. If you get 401 errors, generate a new token using the login endpoint.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/essentials/user-management">
+    Learn how to create employees and validate clients
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Explore all available endpoints and schemas
+  </Card>
+  <Card title="Development Setup" icon="laptop-code" href="/development">
+    Set up local development without Docker
+  </Card>
+  <Card title="Database Schema" icon="database" href="/essentials/database">
+    Understand the database structure and relationships
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Port Already in Use
+
+If you see "port is already allocated" errors:
+
+```bash
+# Find what's using the port (example: 5432)
+lsof -i :5432  # macOS/Linux
+netstat -ano | findstr :5432  # Windows
+
+# Change port in .env file
+DB_PORT=5433  # Use different port
+BE_PORT=8001
+FE_PORT=5174
+
+# Restart with new ports
+docker compose down
+docker compose up -d
+```
+
+### Database Connection Refused
+
+If backend can't connect to the database:
+
+```bash
+# Check database health
+docker compose ps
+
+# View database logs
+docker compose logs db
+
+# Ensure healthcheck passes
+docker inspect calzado_jyr_db | grep -A 5 Health
+```
+
+The backend waits for the database healthcheck (`service_healthy` condition). If it keeps failing, check your `POSTGRES_PASSWORD` in `.env` matches between services.
+
+### Frontend Can't Reach Backend
+
+If API calls fail from the frontend:
+
+1. Verify `VITE_API_URL` in `.env` is `http://localhost:8000`
+2. Check backend is running: `docker compose ps`
+3. Test backend directly: `curl http://localhost:8000/docs`
+4. Restart frontend: `docker compose restart fe`
+
+### Admin Script Fails
+
+If `create_admin.py` fails:
+
+```bash
+# Check database is ready
+docker compose exec db pg_isready -U jyr_user
+
+# Verify tables exist
+docker compose exec db psql -U jyr_user -d calzado_jyr_db -c "\dt"
+
+# Check backend logs for migration errors
+docker compose logs be
+```
+
+<Note>
+Still stuck? Check the [GitHub Issues](https://github.com/your-org/calzado-jyr/issues) or contact support.
+</Note>
+
+## Clean Development Environment
+
+When you're done for the day:
+
+```bash
+# Stop services (keeps data)
+docker compose down
+```
+
+Next time you want to work:
+
+```bash
+# Start services (no rebuild needed if code unchanged)
+docker compose up -d
+```
+
+For a complete fresh start:
+
+```bash
+# Nuclear option: remove everything
+docker compose down -v
+docker compose up -d --build
+docker compose exec be python scripts/create_admin.py
+```
+
+<Tip>
+The database volume (`calzado_jyr_data`) persists data between restarts. Your admin account and any created users survive `docker compose down` unless you use the `-v` flag.
+</Tip>

@@ -1,0 +1,747 @@
+---
+title: Environment Variables
+description: Complete reference for configuring CALZADO J&R environment variables
+icon: key
+---
+
+## Overview
+
+CALZADO J&R uses environment variables to configure database connections, authentication, email services, and inter-service communication. Variables are stored in `.env` files and **never** committed to version control.
+
+<Warning>
+**Security Notice**
+
+The `.env` file contains sensitive credentials. Ensure it's included in `.gitignore` and never commit it to version control.
+</Warning>
+
+## Environment File Locations
+
+<CodeGroup>
+```bash Docker Setup
+# Root directory - used by docker-compose.yml
+.env
+```
+
+```bash Local Development
+# Backend configuration
+be/.env
+
+# Frontend configuration
+fe/.env
+```
+</CodeGroup>
+
+## Quick Setup
+
+<Steps>
+  <Step title="Copy Template Files">
+    <Tabs>
+      <Tab title="Docker">
+        ```bash
+        # From project root
+        cp .env.example .env
+        ```
+      </Tab>
+      <Tab title="Local Development">
+        ```bash
+        # Backend
+        cp be/.env.example be/.env
+        
+        # Frontend
+        cp fe/.env.example fe/.env
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Generate Secure Keys">
+    ```bash
+    # Generate PostgreSQL password
+    openssl rand -base64 24
+    
+    # Generate JWT secret key
+    python -c "import secrets; print(secrets.token_urlsafe(48))"
+    ```
+  </Step>
+
+  <Step title="Edit Configuration">
+    Open `.env` and replace placeholder values with real credentials.
+  </Step>
+</Steps>
+
+## Database Configuration
+
+### PostgreSQL Connection
+
+<ParamField path="POSTGRES_USER" type="string" default="jyr_user" required>
+  PostgreSQL database username.
+  
+  **Docker:** Used to create the database user when the container first starts.
+  
+  **Local:** Must match the user created in your local PostgreSQL installation.
+</ParamField>
+
+<ParamField path="POSTGRES_PASSWORD" type="string" default="cambia_esta_contrasena_segura" required>
+  PostgreSQL database password.
+  
+  <Warning>
+  **Never use the default value in any environment.**
+  
+  Generate a secure password:
+  ```bash
+  openssl rand -base64 24
+  ```
+  </Warning>
+</ParamField>
+
+<ParamField path="POSTGRES_DB" type="string" default="calzado_jyr_db" required>
+  PostgreSQL database name.
+  
+  This database is created automatically in Docker. For local development, create it manually:
+  ```sql
+  CREATE DATABASE calzado_jyr_db OWNER jyr_user;
+  ```
+</ParamField>
+
+<ParamField path="DB_PORT" type="number" default="5432">
+  Port exposed to the host machine.
+  
+  **Docker:** Maps the container's internal port (always 5432) to the host.
+  
+  **Local:** Should match your PostgreSQL installation's port.
+  
+  Change if port 5432 is already in use:
+  ```bash
+  DB_PORT=5433
+  ```
+</ParamField>
+
+<ParamField path="DATABASE_URL" type="string" required>
+  Full PostgreSQL connection string (backend local development only).
+  
+  **Format:**
+  ```
+  postgresql://user:password@host:port/database
+  ```
+  
+  **Example:**
+  ```bash
+  DATABASE_URL=postgresql://jyr_user:mypassword@localhost:5432/calzado_jyr_db
+  ```
+  
+  <Info>
+  In Docker, this is automatically constructed from `POSTGRES_*` variables in `docker-compose.yml`. You don't need to set it in the root `.env`.
+  </Info>
+</ParamField>
+
+## Authentication & Security
+
+### JWT Configuration
+
+<ParamField path="SECRET_KEY" type="string" default="CAMBIA_ESTO_genera_con_secrets_token_urlsafe_48" required>
+  Secret key for signing JWT tokens.
+  
+  <Warning>
+  **MUST be changed in all environments.** Compromising this key allows attackers to forge authentication tokens.
+  </Warning>
+  
+  **Generate a secure key:**
+  ```bash
+  python -c "import secrets; print(secrets.token_urlsafe(48))"
+  ```
+  
+  **Output example:**
+  ```
+  xK7vN2mQ9pR4sT6wY8zA1bC3dE5fG7hJ9kL0mN2oP4qR6sT8uV0wX2yZ4aB6c
+  ```
+</ParamField>
+
+<ParamField path="ALGORITHM" type="string" default="HS256">
+  JWT signing algorithm.
+  
+  **Recommended:** `HS256` (HMAC with SHA-256)
+  
+  **Supported values:**
+  - `HS256`: Symmetric signing (uses `SECRET_KEY`)
+  - `HS384`: Symmetric signing with SHA-384
+  - `HS512`: Symmetric signing with SHA-512
+  - `RS256`: Asymmetric signing with RSA (requires separate public/private keys)
+  
+  <Note>
+  For most use cases, `HS256` provides adequate security and simplicity.
+  </Note>
+</ParamField>
+
+<ParamField path="ACCESS_TOKEN_EXPIRE_MINUTES" type="number" default="15">
+  Access token lifetime in minutes.
+  
+  **Security trade-off:**
+  - **Shorter (5-15 min):** More secure, requires frequent refresh
+  - **Longer (60+ min):** More convenient, higher risk if token is compromised
+  
+  **Recommended:** 15 minutes for production, 60 for development.
+</ParamField>
+
+<ParamField path="REFRESH_TOKEN_EXPIRE_DAYS" type="number" default="7">
+  Refresh token lifetime in days.
+  
+  After this period, users must log in again with their credentials.
+  
+  **Recommended values:**
+  - Production: 7 days
+  - Development: 30 days
+  - High-security: 1 day
+</ParamField>
+
+## Email Configuration
+
+### SMTP Settings
+
+Used for:
+- Sending employee credentials when admins create accounts
+- Password reset emails
+- Account validation notifications
+
+<ParamField path="MAIL_SERVER" type="string" default="smtp.gmail.com" required>
+  SMTP server hostname.
+  
+  **Common providers:**
+  - Gmail: `smtp.gmail.com`
+  - Outlook: `smtp-mail.outlook.com`
+  - SendGrid: `smtp.sendgrid.net`
+  - Mailgun: `smtp.mailgun.org`
+  - Custom: Your organization's SMTP server
+</ParamField>
+
+<ParamField path="MAIL_PORT" type="number" default="587" required>
+  SMTP server port.
+  
+  **Standard ports:**
+  - `587`: TLS/STARTTLS (recommended, encrypted)
+  - `465`: SSL (legacy, encrypted)
+  - `25`: Unencrypted (not recommended)
+  
+  <Tip>
+  Use port 587 with STARTTLS for best compatibility and security.
+  </Tip>
+</ParamField>
+
+<ParamField path="MAIL_USERNAME" type="string" default="noreply@calzadojyr.com" required>
+  SMTP authentication username.
+  
+  Usually your email address or API username (for services like SendGrid).
+  
+  **Example:**
+  ```bash
+  MAIL_USERNAME=notifications@calzadojyr.com
+  ```
+</ParamField>
+
+<ParamField path="MAIL_PASSWORD" type="string" default="tu_contrasena_de_app_smtp" required>
+  SMTP authentication password or API key.
+  
+  <Warning>
+  **For Gmail:** You must use an [App Password](https://support.google.com/accounts/answer/185833), not your regular Google password.
+  
+  Steps:
+  1. Enable 2-Step Verification on your Google Account
+  2. Go to [App Passwords](https://myaccount.google.com/apppasswords)
+  3. Generate a new app password for "Mail"
+  4. Use this 16-character password in `MAIL_PASSWORD`
+  </Warning>
+  
+  **For SendGrid/Mailgun:** Use your API key instead of a password.
+</ParamField>
+
+<ParamField path="MAIL_FROM" type="string" default="noreply@calzadojyr.com" required>
+  Email address shown in the "From" field of sent emails.
+  
+  **Best practices:**
+  - Use a `noreply@` address if you don't monitor replies
+  - Use a monitored address (e.g., `support@`) if you want to receive replies
+  - Must be a valid email address
+  
+  **Example:**
+  ```bash
+  MAIL_FROM=noreply@calzadojyr.com
+  ```
+</ParamField>
+
+<ParamField path="MAIL_FROM_NAME" type="string" default="CALZADO J&R">
+  Display name shown in email clients.
+  
+  This appears as: `CALZADO J&R <noreply@calzadojyr.com>`
+  
+  **Example:**
+  ```bash
+  MAIL_FROM_NAME=CALZADO J&R - Sistema de Gestión
+  ```
+</ParamField>
+
+## Service URLs
+
+### Inter-Service Communication
+
+<ParamField path="FRONTEND_URL" type="string" default="http://localhost:5173" required>
+  Frontend application URL.
+  
+  **Used by backend for:**
+  - CORS (Cross-Origin Resource Sharing) configuration
+  - Generating links in emails (e.g., password reset)
+  
+  **Environment-specific values:**
+  
+  <Tabs>
+    <Tab title="Development">
+      ```bash
+      FRONTEND_URL=http://localhost:5173
+      ```
+    </Tab>
+    <Tab title="Production">
+      ```bash
+      FRONTEND_URL=https://calzadojyr.com
+      ```
+    </Tab>
+    <Tab title="Staging">
+      ```bash
+      FRONTEND_URL=https://staging.calzadojyr.com
+      ```
+    </Tab>
+  </Tabs>
+</ParamField>
+
+<ParamField path="VITE_API_URL" type="string" default="http://localhost:8000" required>
+  Backend API URL.
+  
+  **Used by frontend for:** Making HTTP requests to the API.
+  
+  <Info>
+  The `VITE_` prefix exposes this variable to the browser. Vite only includes variables with this prefix in the client-side bundle.
+  </Info>
+  
+  **Environment-specific values:**
+  
+  <Tabs>
+    <Tab title="Development">
+      ```bash
+      VITE_API_URL=http://localhost:8000
+      ```
+    </Tab>
+    <Tab title="Production">
+      ```bash
+      VITE_API_URL=https://api.calzadojyr.com
+      ```
+    </Tab>
+    <Tab title="Docker">
+      ```bash
+      # Frontend container accesses backend via host
+      VITE_API_URL=http://localhost:8000
+      ```
+    </Tab>
+  </Tabs>
+</ParamField>
+
+## Port Configuration
+
+### Service Ports
+
+<ParamField path="BE_PORT" type="number" default="8000">
+  Backend API port exposed to the host.
+  
+  Change if port 8000 is already in use:
+  ```bash
+  BE_PORT=8001
+  ```
+  
+  <Note>
+  This only affects the host port. Inside Docker, the backend always listens on port 8000.
+  </Note>
+</ParamField>
+
+<ParamField path="FE_PORT" type="number" default="5173">
+  Frontend development server port exposed to the host.
+  
+  Change if port 5173 is already in use:
+  ```bash
+  FE_PORT=5174
+  ```
+  
+  <Note>
+  This is only used by the Vite dev server. Production builds are served by nginx on port 80.
+  </Note>
+</ParamField>
+
+## Complete Examples
+
+### Docker Development (.env)
+
+```bash
+# ════════════════════════════════════
+# Database
+# ════════════════════════════════════
+POSTGRES_USER=jyr_user
+POSTGRES_PASSWORD=7xK9mN2pQ5sT8wY1zA4bC6dE
+POSTGRES_DB=calzado_jyr_db
+DB_PORT=5432
+
+# ════════════════════════════════════
+# JWT & Security
+# ════════════════════════════════════
+SECRET_KEY=xK7vN2mQ9pR4sT6wY8zA1bC3dE5fG7hJ9kL0mN2oP4qR6sT8uV0wX2yZ4aB6c
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# ════════════════════════════════════
+# Email
+# ════════════════════════════════════
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=notifications@calzadojyr.com
+MAIL_PASSWORD=abcd efgh ijkl mnop  # Gmail App Password
+MAIL_FROM=notifications@calzadojyr.com
+MAIL_FROM_NAME=CALZADO J&R
+
+# ════════════════════════════════════
+# Service URLs
+# ════════════════════════════════════
+FRONTEND_URL=http://localhost:5173
+VITE_API_URL=http://localhost:8000
+
+# ════════════════════════════════════
+# Ports
+# ════════════════════════════════════
+BE_PORT=8000
+FE_PORT=5173
+```
+
+### Backend Local Development (be/.env)
+
+```bash
+# ────────────────────────────
+# Database
+# ────────────────────────────
+DATABASE_URL=postgresql://jyr_user:mypassword@localhost:5432/calzado_jyr_db
+
+# ────────────────────────────
+# JWT & Security
+# ────────────────────────────
+SECRET_KEY=xK7vN2mQ9pR4sT6wY8zA1bC3dE5fG7hJ9kL0mN2oP4qR6sT8uV0wX2yZ4aB6c
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60  # Longer for development
+REFRESH_TOKEN_EXPIRE_DAYS=30
+
+# ────────────────────────────
+# Email
+# ────────────────────────────
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=dev@calzadojyr.com
+MAIL_PASSWORD=your-app-password
+MAIL_FROM=dev@calzadojyr.com
+MAIL_FROM_NAME=CALZADO J&R (Dev)
+
+# ────────────────────────────
+# URLs
+# ────────────────────────────
+FRONTEND_URL=http://localhost:5173
+```
+
+### Frontend Local Development (fe/.env)
+
+```bash
+# URL of the backend API
+VITE_API_URL=http://localhost:8000
+```
+
+### Production Example
+
+```bash
+# ════════════════════════════════════
+# Database (use managed database in production)
+# ════════════════════════════════════
+DATABASE_URL=postgresql://jyr_user:STRONG_PASSWORD@db.production.internal:5432/calzado_jyr_db
+
+# ════════════════════════════════════
+# JWT & Security
+# ════════════════════════════════════
+SECRET_KEY=PRODUCTION_SECRET_KEY_64_CHARACTERS_OR_MORE_FOR_MAXIMUM_SECURITY
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# ════════════════════════════════════
+# Email (use transactional email service)
+# ════════════════════════════════════
+MAIL_SERVER=smtp.sendgrid.net
+MAIL_PORT=587
+MAIL_USERNAME=apikey
+MAIL_PASSWORD=SG.xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+MAIL_FROM=noreply@calzadojyr.com
+MAIL_FROM_NAME=CALZADO J&R
+
+# ════════════════════════════════════
+# Service URLs
+# ════════════════════════════════════
+FRONTEND_URL=https://calzadojyr.com
+VITE_API_URL=https://api.calzadojyr.com
+```
+
+## Environment-Specific Configuration
+
+### Development
+
+**Priorities:** Developer convenience, detailed logging, fast iteration
+
+```bash
+ACCESS_TOKEN_EXPIRE_MINUTES=60  # Longer tokens reduce re-login frequency
+REFRESH_TOKEN_EXPIRE_DAYS=30    # Extended refresh period
+MAIL_FROM_NAME=CALZADO J&R (Dev)  # Clearly marked as development
+```
+
+### Staging
+
+**Priorities:** Production-like configuration, testing
+
+```bash
+ACCESS_TOKEN_EXPIRE_MINUTES=15  # Match production
+REFRESH_TOKEN_EXPIRE_DAYS=7     # Match production
+FRONTEND_URL=https://staging.calzadojyr.com
+VITE_API_URL=https://api-staging.calzadojyr.com
+```
+
+### Production
+
+**Priorities:** Security, performance, reliability
+
+```bash
+ACCESS_TOKEN_EXPIRE_MINUTES=15  # Short-lived tokens
+REFRESH_TOKEN_EXPIRE_DAYS=7     # Regular re-authentication
+MAIL_SERVER=smtp.sendgrid.net   # Dedicated email service
+FRONTEND_URL=https://calzadojyr.com
+VITE_API_URL=https://api.calzadojyr.com
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Never Commit .env Files">
+    Ensure `.env` is in `.gitignore`:
+    
+    ```bash
+    # Check if .env is ignored
+    git check-ignore .env
+    # Should output: .env
+    
+    # If not, add to .gitignore
+    echo ".env" >> .gitignore
+    ```
+    
+    **If you accidentally committed `.env`:**
+    
+    ```bash
+    # Remove from git (keeps local file)
+    git rm --cached .env
+    git commit -m "Remove .env from version control"
+    
+    # Rotate all secrets immediately
+    # - Generate new SECRET_KEY
+    # - Change database password
+    # - Regenerate email app passwords
+    ```
+  </Accordion>
+
+  <Accordion title="Use Strong Secrets">
+    **Minimum requirements:**
+    
+    - `SECRET_KEY`: 32+ characters, cryptographically random
+    - `POSTGRES_PASSWORD`: 16+ characters, mix of letters/numbers/symbols
+    - `MAIL_PASSWORD`: Use app-specific passwords or API keys
+    
+    **Generation tools:**
+    
+    ```bash
+    # Python secrets module (recommended)
+    python -c "import secrets; print(secrets.token_urlsafe(48))"
+    
+    # OpenSSL
+    openssl rand -base64 32
+    
+    # Unix /dev/urandom
+    head -c 32 /dev/urandom | base64
+    ```
+  </Accordion>
+
+  <Accordion title="Rotate Secrets Regularly">
+    **Recommended rotation schedule:**
+    
+    - `SECRET_KEY`: Every 90 days or after security incident
+    - `POSTGRES_PASSWORD`: Every 180 days
+    - `MAIL_PASSWORD`: When employee leaves or annually
+    
+    **Rotation procedure for SECRET_KEY:**
+    
+    1. Generate new key
+    2. Update `.env` with new key
+    3. Restart backend service
+    4. All existing tokens become invalid (users must re-login)
+    5. Store old key securely for 24h in case rollback needed
+  </Accordion>
+
+  <Accordion title="Environment-Specific Secrets">
+    **Never reuse secrets across environments:**
+    
+    - Development: Can use weaker secrets for convenience
+    - Staging: Should use production-strength secrets
+    - Production: Maximum security, unique secrets
+    
+    **Example structure:**
+    
+    ```
+    secrets/
+    ├── .env.development
+    ├── .env.staging
+    └── .env.production
+    ```
+    
+    Copy appropriate file to `.env` for each environment.
+  </Accordion>
+
+  <Accordion title="Use Secret Management Tools">
+    For production, consider using dedicated secret management:
+    
+    **Cloud providers:**
+    - AWS Secrets Manager
+    - Google Cloud Secret Manager
+    - Azure Key Vault
+    
+    **Self-hosted:**
+    - HashiCorp Vault
+    - Docker Secrets (Swarm mode)
+    - Kubernetes Secrets
+    
+    **Environment variable injection:**
+    
+    ```bash
+    # Example: Load from external secret manager
+    export SECRET_KEY=$(aws secretsmanager get-secret-value \
+      --secret-id calzado-jyr/jwt-secret \
+      --query SecretString \
+      --output text)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Validation
+
+### Check Configuration
+
+Verify your environment variables are correctly set:
+
+```bash
+# Backend (from be/ directory)
+python -c "from app.config import settings; print(settings.model_dump())"
+
+# Check database connection
+python -c "from app.database import engine; engine.connect()"
+
+# Frontend (from fe/ directory)
+pnpm run dev
+# Check browser console for VITE_API_URL
+```
+
+### Required vs Optional
+
+**Absolutely required (system won't start without these):**
+- `POSTGRES_PASSWORD` or `DATABASE_URL`
+- `SECRET_KEY`
+
+**Required for full functionality:**
+- `MAIL_*` variables (email features won't work)
+- `FRONTEND_URL` (CORS will block requests)
+- `VITE_API_URL` (frontend can't reach backend)
+
+**Optional (have sensible defaults):**
+- `ALGORITHM` (defaults to HS256)
+- `ACCESS_TOKEN_EXPIRE_MINUTES` (defaults to 15)
+- `REFRESH_TOKEN_EXPIRE_DAYS` (defaults to 7)
+- Port numbers (default to standard ports)
+
+## Troubleshooting
+
+### Variables Not Loading
+
+**Issue:** Changes to `.env` not reflected in application
+
+**Solutions:**
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    # Restart services to reload environment
+    docker compose down
+    docker compose up -d
+    
+    # Or rebuild if needed
+    docker compose up -d --build
+    ```
+  </Tab>
+  <Tab title="Backend (Local)">
+    ```bash
+    # Restart uvicorn
+    # Ctrl+C to stop, then:
+    source .venv/bin/activate
+    uvicorn app.main:app --reload
+    ```
+  </Tab>
+  <Tab title="Frontend (Local)">
+    ```bash
+    # Restart Vite dev server
+    # Ctrl+C to stop, then:
+    pnpm run dev
+    ```
+  </Tab>
+</Tabs>
+
+### CORS Errors
+
+**Error:** Browser console shows CORS policy errors
+
+**Cause:** `FRONTEND_URL` doesn't match the actual frontend URL
+
+**Solution:**
+```bash
+# Ensure these match
+FRONTEND_URL=http://localhost:5173  # Backend .env
+VITE_API_URL=http://localhost:8000  # Frontend .env
+```
+
+### Email Not Sending
+
+**Error:** Backend logs show SMTP authentication failed
+
+**Solutions:**
+
+1. **Gmail users:** Use App Password, not regular password
+2. **Check credentials:** Verify `MAIL_USERNAME` and `MAIL_PASSWORD`
+3. **Firewall:** Ensure port 587 is not blocked
+4. **Test connection:**
+   ```bash
+   python -c "
+   import aiosmtplib
+   import asyncio
+   asyncio.run(aiosmtplib.SMTP().connect('smtp.gmail.com', 587))
+   print('Connection successful')
+   "
+   ```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Setup" icon="docker" href="/setup/docker">
+    Run with Docker Compose
+  </Card>
+  <Card title="Local Development" icon="code" href="/setup/local-development">
+    Run without Docker
+  </Card>
+</CardGroup>

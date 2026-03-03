@@ -1,0 +1,67 @@
+---
+title: 'Login'
+api: 'POST /api/v1/auth/login'
+---
+
+Authenticates a user and returns JWT tokens for accessing protected endpoints.
+
+## Request Body
+
+<ParamField body="email" type="string" required>
+  User's email address.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password.
+</ParamField>
+
+## Response
+
+<ResponseField name="access_token" type="string">
+  JWT access token used to authenticate API requests. This token expires after a short period.
+</ResponseField>
+
+<ResponseField name="refresh_token" type="string">
+  JWT refresh token used to obtain new access tokens without re-authenticating.
+</ResponseField>
+
+<ResponseField name="token_type" type="string">
+  Token type, always "bearer".
+</ResponseField>
+
+<RequestExample>
+
+```bash cURL
+curl -X POST https://api.calzadojyr.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "juan.perez@example.com",
+    "password": "SecurePass123"
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200 OK
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAiLCJleHAiOjE3MDk0NzIwMDB9.abc123",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAiLCJleHAiOjE3MTAwNzY4MDB9.xyz789",
+  "token_type": "bearer"
+}
+```
+
+```json 401 Unauthorized
+{
+  "detail": "Credenciales inválidas"
+}
+```
+
+```json 403 Forbidden
+{
+  "detail": "Usuario no validado por el administrador"
+}
+```
+
+</ResponseExample>

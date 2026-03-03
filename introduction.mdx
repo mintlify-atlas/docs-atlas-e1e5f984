@@ -1,0 +1,282 @@
+---
+title: Introduction
+description: Welcome to CALZADO J&R - A comprehensive footwear manufacturing management system
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.png"
+  alt="CALZADO J&R Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.png"
+  alt="CALZADO J&R Hero Dark"
+/>
+
+## Welcome to CALZADO J&R
+
+CALZADO J&R is a complete footwear factory management system designed to streamline operations across manufacturing, inventory, and customer relations. Built with modern technologies and industry best practices, it provides role-based access control for administrators, employees, and clients.
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get your system up and running in under 5 minutes with Docker Compose
+  </Card>
+  <Card
+    title="Development Setup"
+    icon="code"
+    href="/setup/local-development"
+  >
+    Learn how to set up your local development environment without Docker
+  </Card>
+  <Card
+    title="API Reference"
+    icon="book"
+    href="/api/auth/register"
+  >
+    Explore the complete REST API documentation with interactive examples
+  </Card>
+  <Card
+    title="User Management"
+    icon="users"
+    href="/concepts/user-roles"
+  >
+    Understand the three-role system and user workflows
+  </Card>
+</CardGroup>
+
+## Three User Roles
+
+CALZADO J&R implements a sophisticated role-based access control system with three distinct user types:
+
+### Administrator
+
+**Full system control** - Administrators are the backbone of the system with complete access to all features.
+
+- Created manually via database script (not through the UI)
+- Validates and activates client accounts
+- Creates employee accounts and sends credentials via email
+- Can create additional administrator accounts
+- Manages inventory, products, and orders
+- Accesses complete system analytics and reports
+
+<Tip>
+The first admin account is created using the `create_admin.py` script after initial setup. Default credentials are `admin@calzadojyr.com` / `Admin123!` (change immediately after first login).
+</Tip>
+
+### Employee
+
+**Task management and production** - Employees cannot self-register; accounts are created exclusively by administrators.
+
+- Account created only by administrators
+- Receives temporary credentials via email
+- Must change password on first login (`must_change_password` flag)
+- Views assigned tasks in personal dashboard
+- Four occupation types: Guarnición, Solador, Cortador, Emplantillador
+- Tracks work progress and task completion
+
+**Employee Fields:**
+- Full Name (first and last name)
+- Email (unique identifier)
+- Phone number
+- Occupation (production role)
+
+### Client
+
+**Self-service ordering** - Clients can register freely but require admin validation before accessing the system.
+
+- Self-registration through public form
+- Account created with `is_validated=False` and `is_active=False`
+- Awaits administrator approval to activate account
+- Browses product catalog and places orders
+- Tracks order status and history
+- Optional business name for commercial clients
+
+**Client Fields:**
+- Full Name (first and last name)
+- Email (unique identifier)
+- Phone number
+- Password (hashed with bcrypt)
+- Business name (optional, for commercial accounts)
+
+<Note>
+The validation workflow ensures quality control: administrators review each client registration before granting system access.
+</Note>
+
+## Key Features
+
+<CardGroup cols={3}>
+  <Card title="User Authentication" icon="lock">
+    JWT-based authentication with 15-minute access tokens and 7-day refresh tokens. Secure password hashing with bcrypt.
+  </Card>
+  <Card title="Role Management" icon="shield">
+    Three-tier role system with granular permissions. Automatic role detection and dashboard routing.
+  </Card>
+  <Card title="Email Integration" icon="envelope">
+    SMTP-based email system for employee credential delivery and password resets.
+  </Card>
+  <Card title="Inventory Control" icon="boxes">
+    Track raw materials, components, and finished products with real-time updates.
+  </Card>
+  <Card title="Order Management" icon="clipboard-list">
+    Complete order lifecycle from placement to fulfillment with task assignment.
+  </Card>
+  <Card title="Task Assignment" icon="tasks">
+    Assign production tasks to employees by occupation with progress tracking.
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+Built with modern, production-ready technologies:
+
+### Backend
+- **FastAPI** (Python 3.12+) - High-performance async API framework
+- **SQLAlchemy 2.0** - Modern ORM with async support
+- **Alembic** - Database migration management
+- **PostgreSQL 17+** - Robust relational database
+- **JWT** - Secure token-based authentication
+- **pytest** - Comprehensive testing framework
+
+### Frontend
+- **React 18+** - Modern UI library with hooks
+- **TypeScript** - Type-safe JavaScript
+- **Vite** - Lightning-fast build tool with HMR
+- **TailwindCSS 4+** - Utility-first CSS framework
+- **React Router 7+** - Client-side routing
+- **Axios** - HTTP client for API calls
+- **Vitest** - Fast unit testing
+
+### DevOps
+- **Docker** - Containerized deployment
+- **Docker Compose** - Multi-container orchestration
+- **Uvicorn** - ASGI server for FastAPI
+- **Nginx** - Production web server (frontend)
+
+<Tip>
+Docker Compose handles the entire stack setup with a single command - no manual database configuration required!
+</Tip>
+
+## Authentication Flow
+
+CALZADO J&R implements secure authentication patterns for each user type:
+
+### Client Registration Flow
+1. Client fills public registration form
+2. Account created with `is_validated=False`, `is_active=False`
+3. System displays: "Account created successfully. Pending administrator validation"
+4. Administrator reviews and validates account from admin dashboard
+5. System activates account: `is_active=True`, `is_validated=True`
+6. Client can now log in and access the system
+
+### Employee Creation Flow
+1. Administrator fills employee creation form
+2. System generates secure temporary password
+3. System sends email with credentials (email + temporary password)
+4. Account created with `is_active=True`, `is_validated=True`, `must_change_password=True`
+5. Employee logs in with received credentials
+6. System forces password change before dashboard access
+
+### Login Flow
+1. User enters email and password
+2. System validates credentials and account status
+3. System automatically detects user role
+4. If employee first login → force password change
+5. Automatic redirection based on role:
+   - **Admin** → Administrative dashboard
+   - **Employee** → Task dashboard
+   - **Client** → Order dashboard and catalog
+
+<Warning>
+All passwords are hashed using bcrypt. Temporary passwords are generated with cryptographically secure random functions. Access tokens expire after 15 minutes for security.
+</Warning>
+
+## Database Schema
+
+The system uses a clean, normalized PostgreSQL schema:
+
+### Users Table
+- `id` (UUID, Primary Key)
+- `email` (Unique, Indexed)
+- `hashed_password` (bcrypt)
+- `full_name` (VARCHAR)
+- `phone` (VARCHAR, Optional)
+- `role_id` (UUID, Foreign Key → roles)
+- `is_active` (Boolean, default: false)
+- `is_validated` (Boolean, default: false)
+- `must_change_password` (Boolean, default: false)
+- `business_name` (VARCHAR, Optional - Clients only)
+- `occupation` (VARCHAR, Optional - Employees only)
+- `validated_by` (UUID, Foreign Key → users)
+- `validated_at` (Timestamp)
+- `created_at`, `updated_at`, `deleted_at` (Soft deletes)
+
+### Roles Table
+- `id` (UUID, Primary Key)
+- `name` ('admin', 'employee', 'client')
+- `description` (VARCHAR)
+- `created_at`, `updated_at`, `deleted_at` (Soft deletes)
+
+<Note>
+The schema uses UUIDs for all primary keys (better for distributed systems) and implements soft deletes for data recovery.
+</Note>
+
+## System Architecture
+
+CALZADO J&R follows a three-tier architecture:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  Frontend (React)                   │
+│              http://localhost:5173                  │
+│  - User Interface                                   │
+│  - Role-based Dashboards                            │
+│  - Form Validation                                  │
+└──────────────────┬──────────────────────────────────┘
+                   │ HTTP/REST
+                   │ (Axios)
+┌──────────────────▼──────────────────────────────────┐
+│               Backend (FastAPI)                     │
+│              http://localhost:8000                  │
+│  - REST API Endpoints                               │
+│  - JWT Authentication                               │
+│  - Business Logic                                   │
+│  - Email Service                                    │
+└──────────────────┬──────────────────────────────────┘
+                   │ SQLAlchemy ORM
+                   │ (asyncpg)
+┌──────────────────▼──────────────────────────────────┐
+│             Database (PostgreSQL)                   │
+│              localhost:5432                         │
+│  - User & Role Data                                 │
+│  - Inventory & Products                             │
+│  - Orders & Tasks                                   │
+└─────────────────────────────────────────────────────┘
+```
+
+All services communicate through a private Docker network (`calzado_jyr_net`) for security and isolation.
+
+## Getting Started
+
+Ready to dive in? Head over to the [Quickstart Guide](/quickstart) to get CALZADO J&R running in under 5 minutes.
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart with Docker"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Fastest way to get started - one command to rule them all
+  </Card>
+  <Card
+    title="Local Development"
+    icon="laptop-code"
+    href="/setup/local-development"
+  >
+    Set up without Docker for active development work
+  </Card>
+</CardGroup>

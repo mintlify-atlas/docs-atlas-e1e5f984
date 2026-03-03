@@ -1,0 +1,642 @@
+---
+title: Local Development
+description: Run CALZADO J&R locally without Docker for development
+icon: code
+---
+
+## Overview
+
+This guide covers running the backend and frontend directly on your local machine without Docker. This approach is useful for:
+
+- Debugging with native IDE integration
+- Testing specific Python or Node.js versions
+- Environments where Docker is unavailable
+- Lower resource consumption on limited hardware
+
+<Warning>
+Local development requires manual installation and configuration of Python, Node.js, and PostgreSQL. For a simpler setup, consider using [Docker](/setup/docker).
+</Warning>
+
+## Prerequisites
+
+Install the following tools on your system:
+
+| Tool | Minimum Version | Check Command |
+|------|----------------|---------------|
+| **Python** | 3.12+ | `python --version` |
+| **Node.js** | 20 LTS+ | `node --version` |
+| **pnpm** | 9+ | `pnpm --version` |
+| **PostgreSQL** | 17+ | `psql --version` |
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    # Using Homebrew
+    brew install python@3.12 node postgresql@17 pnpm
+    
+    # Start PostgreSQL
+    brew services start postgresql@17
+    ```
+  </Tab>
+  <Tab title="Ubuntu/Debian">
+    ```bash
+    # Python 3.12
+    sudo apt update
+    sudo apt install python3.12 python3.12-venv python3-pip
+    
+    # Node.js 20 LTS
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt install nodejs
+    
+    # pnpm
+    npm install -g pnpm
+    
+    # PostgreSQL 17
+    sudo apt install postgresql-17 postgresql-contrib-17
+    sudo systemctl start postgresql
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    # Using Chocolatey
+    choco install python312 nodejs postgresql pnpm
+    
+    # Or download installers:
+    # Python: https://www.python.org/downloads/
+    # Node.js: https://nodejs.org/
+    # PostgreSQL: https://www.postgresql.org/download/windows/
+    # pnpm: npm install -g pnpm
+    ```
+  </Tab>
+</Tabs>
+
+## Database Setup
+
+<Steps>
+  <Step title="Create Database and User">
+    Connect to PostgreSQL as the superuser:
+
+    ```bash
+    # Linux/macOS
+    sudo -u postgres psql
+    
+    # Windows (PostgreSQL bin directory must be in PATH)
+    psql -U postgres
+    ```
+
+    Execute the following SQL commands:
+
+    ```sql
+    -- Create database user
+    CREATE USER jyr_user WITH PASSWORD 'your_secure_password';
+    
+    -- Create database
+    CREATE DATABASE calzado_jyr_db OWNER jyr_user;
+    
+    -- Grant privileges
+    GRANT ALL PRIVILEGES ON DATABASE calzado_jyr_db TO jyr_user;
+    
+    -- Exit psql
+    \q
+    ```
+  </Step>
+
+  <Step title="Initialize Database Schema">
+    Run the initialization scripts in order:
+
+    ```bash
+    # From the project root
+    psql -U jyr_user -d calzado_jyr_db -f db/init/01_create_tables.sql
+    psql -U jyr_user -d calzado_jyr_db -f db/init/02_triggers_and_indexes.sql
+    ```
+
+    <Info>
+    These scripts create:
+    - UUID extension
+    - `roles` and `users` tables
+    - `password_reset_tokens` table
+    - Indexes for performance
+    - Triggers for automatic `updated_at` timestamps
+    </Info>
+  </Step>
+
+  <Step title="Verify Setup">
+    Connect to the database and verify tables:
+
+    ```bash
+    psql -U jyr_user -d calzado_jyr_db
+    ```
+
+    ```sql
+    -- List all tables
+    \dt
+    
+    -- Verify roles were created
+    SELECT * FROM roles;
+    
+    -- Should show: admin, employee, client
+    ```
+  </Step>
+</Steps>
+
+## Backend Setup
+
+<Steps>
+  <Step title="Navigate to Backend Directory">
+    ```bash
+    cd be
+    ```
+  </Step>
+
+  <Step title="Create Virtual Environment">
+    <Tabs>
+      <Tab title="Linux/macOS">
+        ```bash
+        # Create virtual environment
+        python -m venv .venv
+        
+        # Activate virtual environment
+        source .venv/bin/activate
+        ```
+      </Tab>
+      <Tab title="Windows (PowerShell)">
+        ```powershell
+        # Create virtual environment
+        python -m venv .venv
+        
+        # Activate virtual environment
+        .venv\Scripts\Activate.ps1
+        ```
+      </Tab>
+      <Tab title="Windows (CMD)">
+        ```cmd
+        # Create virtual environment
+        python -m venv .venv
+        
+        # Activate virtual environment
+        .venv\Scripts\activate.bat
+        ```
+      </Tab>
+    </Tabs>
+
+    <Note>
+    You'll know the virtual environment is active when you see `(.venv)` in your terminal prompt.
+    </Note>
+  </Step>
+
+  <Step title="Install Dependencies">
+    ```bash
+    # Upgrade pip
+    pip install --upgrade pip
+    
+    # Install all dependencies
+    pip install -r requirements.txt
+    ```
+
+    **Key Dependencies:**
+    - **fastapi** (0.115.0+): Web framework
+    - **uvicorn** (0.32.0+): ASGI server
+    - **sqlalchemy** (2.0.0+): ORM for database operations
+    - **alembic** (1.14.0+): Database migrations
+    - **pydantic** (2.0.0+): Data validation
+    - **python-jose**: JWT token handling
+    - **passlib[bcrypt]**: Password hashing
+    - **aiosmtplib** (3.0.0+): Async email sending
+  </Step>
+
+  <Step title="Configure Environment">
+    Copy the environment template:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` with your local configuration:
+
+    ```bash
+    # Database connection (local PostgreSQL)
+    DATABASE_URL=postgresql://jyr_user:your_secure_password@localhost:5432/calzado_jyr_db
+    
+    # JWT secret (generate a new one)
+    SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+    ALGORITHM=HS256
+    ACCESS_TOKEN_EXPIRE_MINUTES=15
+    REFRESH_TOKEN_EXPIRE_DAYS=7
+    
+    # Email configuration
+    MAIL_SERVER=smtp.gmail.com
+    MAIL_PORT=587
+    MAIL_USERNAME=your-email@gmail.com
+    MAIL_PASSWORD=your-app-password
+    MAIL_FROM=your-email@gmail.com
+    MAIL_FROM_NAME=CALZADO J&R
+    
+    # Frontend URL (for CORS)
+    FRONTEND_URL=http://localhost:5173
+    ```
+
+    <Warning>
+    Replace `your_secure_password` and other placeholder values with real credentials.
+    </Warning>
+  </Step>
+
+  <Step title="Create Admin User">
+    Run the admin creation script:
+
+    ```bash
+    python scripts/create_admin.py
+    ```
+
+    This creates the initial administrator:
+    - **Email:** `admin@calzadojyr.com`
+    - **Password:** `Admin123!`
+
+    <Tip>
+    Change this password immediately after first login.
+    </Tip>
+  </Step>
+</Steps>
+
+## Frontend Setup
+
+<Steps>
+  <Step title="Navigate to Frontend Directory">
+    ```bash
+    # From project root
+    cd fe
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    <Tabs>
+      <Tab title="pnpm (Recommended)">
+        ```bash
+        pnpm install --frozen-lockfile
+        ```
+
+        The `--frozen-lockfile` flag ensures exact versions from `pnpm-lock.yaml` are installed (equivalent to `npm ci`).
+      </Tab>
+      <Tab title="npm">
+        ```bash
+        npm ci
+        ```
+
+        <Note>
+        The project uses pnpm for dependency management. Using npm may cause version conflicts.
+        </Note>
+      </Tab>
+    </Tabs>
+
+    **Key Dependencies:**
+    - **react** (19.2.0+): UI library
+    - **react-dom** (19.2.0+): React renderer
+    - **react-router-dom** (7.13.0+): Client-side routing
+    - **axios** (1.13.4+): HTTP client
+    - **lucide-react** (0.563.0+): Icon library
+    - **tailwindcss** (4.1.18+): Utility-first CSS framework
+    - **vite** (7.2.4+): Build tool and dev server
+    - **typescript** (5.9.3+): Type safety
+  </Step>
+
+  <Step title="Configure Environment">
+    Copy the environment template:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` to point to your local backend:
+
+    ```bash
+    # Backend API URL
+    VITE_API_URL=http://localhost:8000
+    ```
+
+    <Info>
+    Vite exposes variables prefixed with `VITE_` to the browser. This URL is used by the frontend to make API requests.
+    </Info>
+  </Step>
+</Steps>
+
+## Running the Application
+
+### Start Backend
+
+<Tabs>
+  <Tab title="Development Mode">
+    ```bash
+    cd be
+    source .venv/bin/activate  # or .venv\Scripts\activate on Windows
+    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    ```
+
+    **Flags:**
+    - `--reload`: Auto-restart on code changes
+    - `--host 0.0.0.0`: Accept connections from any network interface
+    - `--port 8000`: Listen on port 8000
+
+    Access points:
+    - API: http://localhost:8000
+    - Interactive docs: http://localhost:8000/docs
+    - ReDoc: http://localhost:8000/redoc
+  </Tab>
+  <Tab title="Production Mode">
+    ```bash
+    cd be
+    source .venv/bin/activate
+    uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+    ```
+
+    **Flags:**
+    - `--workers 4`: Run 4 worker processes (adjust based on CPU cores)
+    - No `--reload`: Better performance without file watching
+  </Tab>
+</Tabs>
+
+### Start Frontend
+
+<Tabs>
+  <Tab title="Development Mode">
+    ```bash
+    cd fe
+    pnpm run dev
+    ```
+
+    The Vite dev server starts with:
+    - Hot Module Replacement (HMR)
+    - Fast refresh on file changes
+    - TypeScript type checking
+
+    Access: http://localhost:5173
+  </Tab>
+  <Tab title="Production Build">
+    ```bash
+    cd fe
+    
+    # Build for production
+    pnpm run build
+    
+    # Preview production build
+    pnpm run preview
+    ```
+
+    The build output goes to `dist/` directory.
+  </Tab>
+</Tabs>
+
+## Development Workflow
+
+### Terminal Layout
+
+For efficient development, use multiple terminal windows/tabs:
+
+```
+┌─────────────────┬─────────────────┐
+│  Backend        │  Frontend       │
+│  (be/)          │  (fe/)          │
+│  uvicorn --reload│  pnpm run dev   │
+├─────────────────┴─────────────────┤
+│  Database (optional)              │
+│  psql -U jyr_user -d calzado...  │
+└───────────────────────────────────┘
+```
+
+### Common Tasks
+
+#### Backend Development
+
+```bash
+# Run tests
+cd be
+pytest
+
+# Run tests with coverage
+pytest --cov=app --cov-report=html
+
+# Lint code with ruff
+ruff check .
+
+# Format code with ruff
+ruff format .
+
+# Create database migration
+alembic revision --autogenerate -m "description"
+
+# Run migrations
+alembic upgrade head
+```
+
+#### Frontend Development
+
+```bash
+# Run tests
+cd fe
+pnpm run test
+
+# Run tests in watch mode
+pnpm run test:watch
+
+# Check TypeScript types
+pnpm run build
+
+# Lint code
+pnpm run lint
+
+# Format code
+pnpm run format
+
+# Check formatting
+pnpm run format:check
+```
+
+## Database Management
+
+### Using psql
+
+```bash
+# Connect to database
+psql -U jyr_user -d calzado_jyr_db
+
+# Useful psql commands:
+\dt              # List tables
+\d users         # Describe users table
+\du              # List roles
+\l               # List databases
+\q               # Quit
+```
+
+### Common Queries
+
+```sql
+-- View all users
+SELECT u.email, u.full_name, r.name as role 
+FROM users u 
+JOIN roles r ON u.role_id = r.id;
+
+-- Count users by role
+SELECT r.name, COUNT(u.id) as user_count 
+FROM roles r 
+LEFT JOIN users u ON r.id = u.role_id 
+GROUP BY r.name;
+
+-- Find unvalidated clients
+SELECT email, full_name, created_at 
+FROM users 
+WHERE is_validated = false;
+```
+
+### Database Backup & Restore
+
+```bash
+# Backup
+pg_dump -U jyr_user calzado_jyr_db > backup_$(date +%Y%m%d).sql
+
+# Restore
+psql -U jyr_user calzado_jyr_db < backup_20260303.sql
+
+# Backup with compression
+pg_dump -U jyr_user calzado_jyr_db | gzip > backup.sql.gz
+
+# Restore from compressed backup
+gunzip -c backup.sql.gz | psql -U jyr_user calzado_jyr_db
+```
+
+## Troubleshooting
+
+### Backend Issues
+
+#### ModuleNotFoundError
+
+**Error:** `ModuleNotFoundError: No module named 'fastapi'`
+
+**Solution:**
+```bash
+# Ensure virtual environment is activated
+source .venv/bin/activate  # Linux/macOS
+.venv\Scripts\activate     # Windows
+
+# Reinstall dependencies
+pip install -r requirements.txt
+```
+
+#### Database Connection Error
+
+**Error:** `OperationalError: could not connect to server`
+
+**Solutions:**
+1. Verify PostgreSQL is running:
+   ```bash
+   # Linux
+   sudo systemctl status postgresql
+   
+   # macOS
+   brew services list
+   
+   # Windows
+   services.msc  # Check PostgreSQL service
+   ```
+
+2. Check connection parameters in `.env`:
+   ```bash
+   DATABASE_URL=postgresql://jyr_user:password@localhost:5432/calzado_jyr_db
+   #                          ^^^^      ^^^^       ^^^^      ^^^^    ^^^^^
+   #                          user   password    host      port   database
+   ```
+
+3. Test connection manually:
+   ```bash
+   psql -U jyr_user -d calzado_jyr_db -h localhost
+   ```
+
+#### Import Errors
+
+**Error:** `ImportError: attempted relative import with no known parent package`
+
+**Solution:** Run commands from the correct directory:
+```bash
+# Always run from be/ directory
+cd be
+python scripts/create_admin.py
+uvicorn app.main:app --reload
+```
+
+### Frontend Issues
+
+#### Port Already in Use
+
+**Error:** `Port 5173 is already in use`
+
+**Solution:**
+```bash
+# Kill process on port 5173 (Linux/macOS)
+lsof -ti:5173 | xargs kill -9
+
+# Windows
+netstat -ano | findstr :5173
+taskkill /PID <PID> /F
+
+# Or use a different port
+pnpm run dev -- --port 5174
+```
+
+#### API Connection Refused
+
+**Error:** `Network Error` or `ERR_CONNECTION_REFUSED`
+
+**Solutions:**
+1. Verify backend is running: http://localhost:8000/docs
+2. Check `VITE_API_URL` in `fe/.env`:
+   ```bash
+   VITE_API_URL=http://localhost:8000
+   ```
+3. Restart Vite dev server after changing `.env`
+
+#### Type Errors
+
+**Error:** TypeScript compilation errors
+
+**Solution:**
+```bash
+# Check types without building
+pnpm run build
+
+# Clear TypeScript cache
+rm -rf node_modules/.vite
+pnpm run dev
+```
+
+### Python Virtual Environment
+
+#### Wrong Python Version
+
+**Issue:** Virtual environment uses wrong Python version
+
+**Solution:**
+```bash
+# Remove old venv
+rm -rf .venv
+
+# Create with specific version
+python3.12 -m venv .venv
+
+# Verify version
+source .venv/bin/activate
+python --version  # Should show 3.12+
+```
+
+#### Deactivate Virtual Environment
+
+```bash
+deactivate
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Setup" icon="docker" href="/setup/docker">
+    Switch to Docker for easier management
+  </Card>
+  <Card title="Environment Variables" icon="key" href="/setup/environment-variables">
+    Complete environment configuration
+  </Card>
+</CardGroup>

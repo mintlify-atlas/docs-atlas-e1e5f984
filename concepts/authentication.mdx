@@ -1,0 +1,530 @@
+---
+title: 'Authentication'
+description: 'JWT-based authentication system with access tokens and refresh tokens'
+icon: 'lock'
+---
+
+## Overview
+
+CALZADO J&R uses JWT (JSON Web Tokens) for stateless authentication. The system implements a dual-token strategy with short-lived access tokens and long-lived refresh tokens for enhanced security.
+
+<CardGroup cols={2}>
+  <Card title="Access Token" icon="key" color="#1e40af">
+    **15 minutes** validity
+    
+    Used for API requests
+  </Card>
+  <Card title="Refresh Token" icon="arrows-rotate" color="#d97706">
+    **7 days** validity
+    
+    Used to renew access tokens
+  </Card>
+</CardGroup>
+
+---
+
+## Token Configuration
+
+Token lifetimes are configured in `be/app/config.py` and can be customized via environment variables:
+
+```python
+class Settings(BaseSettings):
+    # JWT and Security
+    SECRET_KEY: str                          # Required: Generate with secrets.token_urlsafe(48)
+    ALGORITHM: str = "HS256"                 # JWT signing algorithm
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15    # Access token lifetime
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7       # Refresh token lifetime
+```
+
+<Accordion title="Generate Secure SECRET_KEY">
+  The `SECRET_KEY` is critical for JWT security. Generate a cryptographically secure key:
+
+  ```bash
+  python -c "import secrets; print(secrets.token_urlsafe(48))"
+  ```
+
+  Add this to your `.env` file:
+  ```bash
+  SECRET_KEY=your_generated_key_here
+  ```
+
+  <Warning>
+  Never commit the `SECRET_KEY` to version control. Keep it in `.env` which is in `.gitignore`.
+  </Warning>
+</Accordion>
+
+---
+
+## Authentication Flows
+
+### Client Registration Flow
+
+Clients can self-register, but their accounts require admin validation before they can login.
+
+<Steps>
+  <Step title="Submit Registration">
+    Client submits registration form via `POST /api/v1/auth/register`
+
+    ```json
+    {
+      "email": "cliente@example.com",
+      "password": "SecurePass123!",
+      "full_name": "Juan Pérez",
+      "phone": "+57 300 123 4567",
+      "business_name": "Zapatería El Sol"  // Optional
+    }
+    ```
+  </Step>
+  
+  <Step title="Account Created (Inactive)">
+    System creates user with `is_active=False` and `is_validated=False`
+
+    ```python
+    new_user = User(
+        email=user_data.email,
+        hashed_password=hash_password(user_data.password),
+        role_id=client_role.id,
+        is_active=False,      # Cannot login yet
+        is_validated=False,   # Pending admin approval
+    )
+    ```
+  </Step>
+  
+  <Step title="Pending Validation">
+    Client receives message: "Account created successfully. Pending validation by administrator"
+  </Step>
+  
+  <Step title="Admin Validates">
+    Admin reviews and approves the account, setting:
+    - `is_active=True`
+    - `is_validated=True`
+    - `validated_by=admin_user_id`
+    - `validated_at=current_timestamp`
+  </Step>
+  
+  <Step title="Client Can Login">
+    Client can now successfully login and receive JWT tokens
+  </Step>
+</Steps>
+
+<Info>
+**Implementation:** See `be/app/services/auth_service.py:35` for the complete registration logic.
+</Info>
+
+---
+
+### Employee Creation Flow
+
+Employees cannot self-register. Their accounts are created by administrators with temporary passwords.
+
+<Steps>
+  <Step title="Admin Creates Account">
+    Admin submits employee creation form with:
+    - Full name, email, phone
+    - Occupation (guarnición, solador, cortador, emplantillador)
+  </Step>
+  
+  <Step title="System Generates Password">
+    Backend generates a secure temporary password
+
+    ```python
+    import secrets
+    temp_password = secrets.token_urlsafe(12)
+    ```
+  </Step>
+  
+  <Step title="Email Sent">
+    System emails credentials to the employee:
+    - Email address (username)
+    - Temporary password
+  </Step>
+  
+  <Step title="Account Active, Password Must Change">
+    Account created with:
+    - `is_active=True`
+    - `is_validated=True`
+    - `must_change_password=True`
+  </Step>
+  
+  <Step title="First Login Forces Password Change">
+    Employee logs in with temporary password, system immediately requires password change before dashboard access
+  </Step>
+</Steps>
+
+<Warning>
+Employees cannot access their dashboard until they change their password. The `must_change_password` flag is checked on every protected endpoint.
+</Warning>
+
+---
+
+### Login Flow
+
+Standard authentication flow for all user types.
+
+<Steps>
+  <Step title="Submit Credentials">
+    User sends `POST /api/v1/auth/login` with email and password
+
+    ```json
+    {
+      "email": "user@example.com",
+      "password": "their_password"
+    }
+    ```
+  </Step>
+  
+  <Step title="Credential Validation">
+    System validates:
+    1. User exists in database
+    2. Password matches using bcrypt verification
+    3. Account is active (`is_active=True`)
+
+    ```python
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account pending validation")
+    ```
+  </Step>
+  
+  <Step title="Generate JWT Tokens">
+    System creates both access and refresh tokens:
+
+    ```python
+    access_token = create_access_token(data={"sub": user.email})
+    refresh_token = create_refresh_token(data={"sub": user.email})
+    ```
+  </Step>
+  
+  <Step title="Return Tokens">
+    Response includes both tokens:
+
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "token_type": "bearer"
+    }
+    ```
+  </Step>
+  
+  <Step title="Frontend Stores Tokens">
+    - Store `access_token` in memory or short-lived storage
+    - Store `refresh_token` in secure storage (HttpOnly cookie recommended)
+    - Include `Authorization: Bearer {access_token}` header in all API requests
+  </Step>
+</Steps>
+
+<Info>
+**Implementation:** Login logic in `be/app/services/auth_service.py:77`
+</Info>
+
+---
+
+### Token Refresh Flow
+
+When the access token expires, use the refresh token to obtain a new pair without re-authentication.
+
+<Steps>
+  <Step title="Access Token Expires">
+    After 15 minutes, API requests return `401 Unauthorized`
+  </Step>
+  
+  <Step title="Request New Tokens">
+    Send `POST /api/v1/auth/refresh` with refresh token:
+
+    ```json
+    {
+      "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    }
+    ```
+  </Step>
+  
+  <Step title="Validate Refresh Token">
+    System verifies:
+    1. Token is valid and not expired
+    2. Token type is "refresh" (not "access")
+    3. User still exists and is active
+
+    ```python
+    payload = decode_token(refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    ```
+  </Step>
+  
+  <Step title="Generate New Token Pair">
+    System creates fresh access and refresh tokens:
+
+    ```python
+    new_access = create_access_token(data={"sub": user.email})
+    new_refresh = create_refresh_token(data={"sub": user.email})
+    ```
+  </Step>
+  
+  <Step title="Return New Tokens">
+    Client receives new token pair and continues operation
+  </Step>
+</Steps>
+
+<Check>
+**Best Practice:** Implement automatic token refresh in your frontend to seamlessly renew tokens before they expire.
+</Check>
+
+---
+
+## Password Management
+
+### Change Password (Authenticated)
+
+Allows logged-in users to change their password.
+
+**Endpoint:** `POST /api/v1/auth/change-password`
+
+**Request:**
+```json
+{
+  "current_password": "OldPassword123",
+  "new_password": "NewSecurePass456!"
+}
+```
+
+**Process:**
+1. Verify current password is correct
+2. Hash new password with bcrypt
+3. Update `hashed_password` in database
+4. Set `must_change_password=False` (for employees)
+
+**Implementation:** `be/app/services/auth_service.py:140`
+
+---
+
+### Forgot Password Flow
+
+Secure password reset via email token.
+
+<Steps>
+  <Step title="Request Password Reset">
+    User submits `POST /api/v1/auth/forgot-password`:
+
+    ```json
+    {
+      "email": "user@example.com"
+    }
+    ```
+
+    <Info>
+    The endpoint always returns success, even if email doesn't exist, to prevent user enumeration.
+    </Info>
+  </Step>
+  
+  <Step title="Generate Reset Token">
+    System creates a unique token with 1-hour expiration:
+
+    ```python
+    reset_token = str(uuid.uuid4())
+    token_record = PasswordResetToken(
+        user_id=user.id,
+        token=reset_token,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        used=False
+    )
+    ```
+  </Step>
+  
+  <Step title="Email Sent">
+    User receives email with reset link:
+    ```
+    https://calzadojyr.com/reset-password?token={reset_token}
+    ```
+  </Step>
+  
+  <Step title="Submit New Password">
+    User clicks link and submits `POST /api/v1/auth/reset-password`:
+
+    ```json
+    {
+      "token": "550e8400-e29b-41d4-a716-446655440000",
+      "new_password": "NewPassword123!"
+    }
+    ```
+  </Step>
+  
+  <Step title="Validate Token and Reset">
+    System validates:
+    - Token exists in database
+    - Token not expired (< 1 hour old)
+    - Token not already used
+
+    Then:
+    - Updates user password
+    - Marks token as `used=True`
+  </Step>
+</Steps>
+
+<Warning>
+Reset tokens are single-use and expire after 1 hour. Used or expired tokens cannot be reused.
+</Warning>
+
+---
+
+## Security Implementation
+
+### Password Hashing
+
+All passwords are hashed using **bcrypt** via the `passlib` library:
+
+```python
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    """Hash a plain-text password using bcrypt."""
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plain-text password against its hash."""
+    return pwd_context.verify(plain_password, hashed_password)
+```
+
+<Info>
+**Why bcrypt?** It's a slow, adaptive hashing function specifically designed for passwords. It includes a built-in salt and configurable work factor.
+</Info>
+
+---
+
+### JWT Token Structure
+
+Tokens are signed using HS256 algorithm and contain:
+
+**Access Token Payload:**
+```json
+{
+  "sub": "user@example.com",  // Subject (user identifier)
+  "type": "access",            // Token type
+  "exp": 1735934400            // Expiration timestamp (15 min from issue)
+}
+```
+
+**Refresh Token Payload:**
+```json
+{
+  "sub": "user@example.com",  // Subject (user identifier)
+  "type": "refresh",           // Token type
+  "exp": 1736539200            // Expiration timestamp (7 days from issue)
+}
+```
+
+**Token Creation:**
+```python
+from jose import jwt
+from datetime import datetime, timedelta, timezone
+
+def create_access_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+```
+
+---
+
+### Protected Endpoints
+
+Protected routes require a valid access token in the Authorization header:
+
+```http
+GET /api/v1/users/me
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+The `get_current_user` dependency validates the token:
+
+```python
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """Extract and validate user from JWT access token."""
+    payload = decode_token(token)
+    
+    # Validate token type
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    
+    # Get user from database
+    email = payload.get("sub")
+    user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+    
+    # Verify user is active
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="Account inactive")
+    
+    return user
+```
+
+<Info>
+**Implementation:** See `be/app/dependencies.py:32` for complete authentication middleware.
+</Info>
+
+---
+
+## API Endpoints Reference
+
+| Endpoint | Method | Description | Authentication |
+|----------|--------|-------------|----------------|
+| `/api/v1/auth/register` | POST | Register new client | Public |
+| `/api/v1/auth/login` | POST | Login and get tokens | Public |
+| `/api/v1/auth/refresh` | POST | Refresh access token | Public |
+| `/api/v1/auth/change-password` | POST | Change password | Required |
+| `/api/v1/auth/forgot-password` | POST | Request password reset | Public |
+| `/api/v1/auth/reset-password` | POST | Reset password with token | Public |
+| `/api/v1/users/me` | GET | Get current user profile | Required |
+
+<Check>
+**Complete API Documentation:** Available at `http://localhost:8000/docs` when running the backend.
+</Check>
+
+---
+
+## Source Code Reference
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear">
+    `be/app/config.py`
+    
+    Token lifetimes and security settings
+  </Card>
+  
+  <Card title="Security Utilities" icon="shield">
+    `be/app/utils/security.py`
+    
+    JWT creation, password hashing
+  </Card>
+  
+  <Card title="Auth Service" icon="server">
+    `be/app/services/auth_service.py`
+    
+    Business logic for all auth flows
+  </Card>
+  
+  <Card title="Auth Router" icon="route">
+    `be/app/routers/auth.py`
+    
+    HTTP endpoints for authentication
+  </Card>
+  
+  <Card title="Dependencies" icon="plug">
+    `be/app/dependencies.py`
+    
+    Authentication middleware
+  </Card>
+  
+  <Card title="User Model" icon="database">
+    `be/app/models/user.py`
+    
+    User table schema
+  </Card>
+</CardGroup>

@@ -1,0 +1,248 @@
+---
+title: Employee Management
+description: How administrators create employee accounts with temporary passwords in CALZADO J&R
+---
+
+## Overview
+
+Unlike clients who can self-register, employees **cannot register themselves**. Employee accounts must be created exclusively by administrators, who generate temporary credentials that are sent to the employee via email.
+
+<Warning>
+  Employees do not have access to the public registration form. Any attempt to register as an employee through the standard registration flow will result in a client account being created instead.
+</Warning>
+
+## Employee Creation Flow
+
+<Steps>
+  <Step title="Admin accesses employee creation form">
+    From the admin dashboard, the administrator navigates to the employee management section and clicks "Create New Employee".
+  </Step>
+  
+  <Step title="Admin fills employee information">
+    The administrator provides:
+    
+    - **Full Name**: Employee's complete name
+    - **Email**: Unique email address (will be used for login)
+    - **Phone**: Contact phone number
+    - **Occupation**: One of the following roles:
+      - Guarnición (Upper assembly)
+      - Solador (Sole attachment)
+      - Cortador (Cutting)
+      - Emplantillador (Insole placement)
+  </Step>
+  
+  <Step title="System generates temporary password">
+    The backend automatically generates a secure temporary password using cryptographic randomness.
+    
+    <Note>
+      The temporary password generation logic should use `secrets.token_urlsafe()` or similar cryptographically secure methods to ensure unpredictability.
+    </Note>
+  </Step>
+  
+  <Step title="Account created with special flags">
+    The employee account is created with:
+    
+    ```python
+    new_employee = User(
+        email=employee_data.email,
+        full_name=employee_data.full_name,
+        hashed_password=hash_password(temp_password),
+        role_id=employee_role.id,
+        is_active=True,        # Immediately active
+        is_validated=True,     # Pre-validated by admin
+        must_change_password=True,  # Force password change on first login
+        occupation=employee_data.occupation,
+    )
+    ```
+    
+    Key differences from client accounts:
+    - `is_active=True` - Can log in immediately
+    - `is_validated=True` - No need for admin validation
+    - `must_change_password=True` - **Must** change password on first login
+  </Step>
+  
+  <Step title="Credentials sent via email">
+    The system sends an automated email to the employee containing:
+    
+    - Their username (email address)
+    - The temporary password
+    - Instructions to log in and change their password
+    - Link to the login page
+    
+    <Warning>
+      In the current development implementation, emails are printed to the server console instead of being sent via SMTP. In production, ensure proper email service configuration.
+    </Warning>
+  </Step>
+</Steps>
+
+## Employee Roles and Occupations
+
+The `occupation` field identifies the employee's role in the production process:
+
+| Occupation | Spanish | Description |
+|------------|---------|-------------|
+| Upper assembly | Guarnición | Assembles the upper part of the shoe |
+| Sole attachment | Solador | Attaches soles to the shoe |
+| Cutting | Cortador | Cuts materials according to patterns |
+| Insole placement | Emplantillador | Places and secures insoles |
+
+<Note>
+  The `occupation` field is stored in the `users` table and is exclusive to employee accounts. It is `NULL` for clients and administrators.
+</Note>
+
+Reference: `be/app/models/user.py:100-104`
+
+## First Login and Forced Password Change
+
+### Detection Logic
+
+When an employee logs in, the system checks the `must_change_password` flag:
+
+```python
+if not user or not verify_password(login_data.password, user.hashed_password):
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Credenciales inválidas",
+    )
+
+if not user.is_active:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Cuenta pendiente de validación por el administrador.",
+    )
+```
+
+Reference: `be/app/services/auth_service.py:82-93`
+
+### Frontend Handling
+
+The frontend detects the `must_change_password` flag in the user profile and:
+
+1. Redirects to the change password page immediately after login
+2. Blocks access to other pages until password is changed
+3. Displays a clear message explaining the requirement
+
+<Note>
+  After the employee successfully changes their password, the `must_change_password` flag is set to `false`, allowing normal access to the system.
+</Note>
+
+## Account State Comparison
+
+### Employee Account (Newly Created)
+
+| Flag | Value | Meaning |
+|------|-------|----------|
+| `is_active` | `true` | Can log in immediately |
+| `is_validated` | `true` | Pre-validated by admin |
+| `must_change_password` | `true` | Must change password on first login |
+| `occupation` | Set | Production role |
+| `business_name` | `NULL` | Not applicable |
+
+### Client Account (Newly Registered)
+
+| Flag | Value | Meaning |
+|------|-------|----------|
+| `is_active` | `false` | Cannot log in |
+| `is_validated` | `false` | Awaiting admin validation |
+| `must_change_password` | `false` | Not applicable |
+| `occupation` | `NULL` | Not applicable |
+| `business_name` | May be set | Optional business name |
+
+## Email Template Structure
+
+While the current implementation prints to console, the production email should include:
+
+```
+Subject: Bienvenido a CALZADO J&R - Credenciales de acceso
+
+Hola [Full Name],
+
+Tu cuenta de empleado ha sido creada en el sistema CALZADO J&R.
+
+Credenciales de acceso:
+- Usuario: [email]
+- Contraseña temporal: [temp_password]
+
+Por seguridad, deberás cambiar tu contraseña en el primer inicio de sesión.
+
+Accede al sistema aquí: [FRONTEND_URL]/login
+
+Ocupación asignada: [occupation]
+
+Saludos,
+Equipo CALZADO J&R
+```
+
+Reference: `be/app/utils/email.py` (template needs implementation)
+
+## Security Considerations
+
+### Temporary Password Generation
+
+<Warning>
+  Temporary passwords should be:
+  - Generated using `secrets.token_urlsafe()` or `secrets.token_hex()`
+  - At least 16 characters long
+  - Single-use (invalidated after first successful password change)
+  - Sent over encrypted channels only (HTTPS, TLS email)
+</Warning>
+
+### Email Delivery
+
+For production deployment:
+
+1. Configure SMTP settings in `.env`:
+   ```bash
+   MAIL_SERVER=smtp.gmail.com
+   MAIL_PORT=587
+   MAIL_USERNAME=your-email@gmail.com
+   MAIL_PASSWORD=your-app-password
+   MAIL_FROM=noreply@calzadojyr.com
+   ```
+
+2. Implement proper email sending with `aiosmtplib`
+3. Use HTML email templates for better presentation
+4. Include security warnings about not sharing credentials
+
+### Password Change Enforcement
+
+The system ensures password change by:
+
+1. Setting `must_change_password=True` on account creation
+2. Frontend checking this flag after login
+3. Redirecting to password change page if flag is true
+4. Blocking access to other pages until completed
+
+## Admin Permissions
+
+<Note>
+  Only users with the `admin` role can create employee accounts. This prevents employees from creating additional employee accounts or elevating their own privileges.
+</Note>
+
+## Database Schema
+
+Employee accounts in the `users` table:
+
+| Column | Type | Value for New Employee |
+|--------|------|------------------------|
+| `id` | UUID | Auto-generated |
+| `email` | VARCHAR(255) | Employee's email (unique, indexed) |
+| `hashed_password` | VARCHAR(255) | Bcrypt hash of temporary password |
+| `full_name` | VARCHAR(255) | Employee's full name |
+| `phone` | VARCHAR(20) | Employee's phone |
+| `role_id` | UUID | ID of 'employee' role |
+| `is_active` | BOOLEAN | `true` |
+| `is_validated` | BOOLEAN | `true` |
+| `must_change_password` | BOOLEAN | `true` |
+| `business_name` | VARCHAR(255) | NULL |
+| `occupation` | VARCHAR(100) | One of: Guarnición, Solador, Cortador, Emplantillador |
+| `validated_by` | UUID | Admin's user ID |
+| `validated_at` | TIMESTAMP | Account creation time |
+
+Reference: `be/app/models/user.py`
+
+## Related Features
+
+- [User Registration](/features/user-registration) - How clients self-register (different from employees)
+- [Password Management](/features/password-management) - Password change flow for first login
+- [Client Validation](/features/client-validation) - Admin validation workflow for clients

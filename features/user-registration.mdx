@@ -1,0 +1,257 @@
+---
+title: User Registration
+description: Client self-registration flow and validation in CALZADO J&R
+---
+
+## Overview
+
+CALZADO J&R allows potential clients to register themselves through a public registration form. Once registered, accounts remain inactive until validated by an administrator.
+
+## Registration Flow
+
+<Steps>
+  <Step title="Client fills registration form">
+    The client provides their information through the registration page at `/register`:
+    
+    - Full name (minimum 2 characters)
+    - Email address (must be unique)
+    - Password (minimum 8 characters with complexity requirements)
+    - Password confirmation
+    - Terms and conditions acceptance
+  </Step>
+  
+  <Step title="Frontend validates input">
+    The `RegisterPage.tsx` component validates:
+    
+    - Password and confirmation match
+    - Terms and conditions are accepted
+    - All required fields are filled
+    
+    ```tsx
+    if (formData.password !== formData.confirmPassword) {
+      setError("Las contraseñas no coinciden");
+      return;
+    }
+    
+    if (!acceptedTerms) {
+      setError("Debes aceptar los términos y condiciones para continuar");
+      return;
+    }
+    ```
+  </Step>
+  
+  <Step title="Backend validates and creates account">
+    The backend endpoint `POST /api/v1/auth/register` performs additional validation:
+    
+    **Password strength requirements** (enforced by `UserCreate` schema):
+    - At least 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one number
+    
+    **Email uniqueness check**:
+    ```python
+    stmt = select(User).where(User.email == user_data.email)
+    existing_user = db.execute(stmt).scalar_one_or_none()
+    
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El email ya está registrado",
+        )
+    ```
+  </Step>
+  
+  <Step title="Account created as inactive">
+    The new user is created with the `client` role and inactive status:
+    
+    ```python
+    new_user = User(
+        email=user_data.email,
+        full_name=user_data.full_name,
+        hashed_password=hash_password(user_data.password),
+        role_id=client_role.id,
+        is_active=False,
+        is_validated=False,
+    )
+    ```
+    
+    Reference: `be/app/services/auth_service.py:62-69`
+  </Step>
+  
+  <Step title="Client receives confirmation message">
+    The frontend displays a success message:
+    
+    ```
+    "Cuenta creada exitosamente. Pendiente de validación por el administrador."
+    ```
+    
+    The client **cannot log in** until an administrator validates their account.
+  </Step>
+</Steps>
+
+## Account States
+
+A newly registered client account has the following flags:
+
+| Flag | Value | Meaning |
+|------|-------|----------|
+| `is_active` | `false` | Account cannot log in |
+| `is_validated` | `false` | Admin has not reviewed the account |
+| `must_change_password` | `false` | Not applicable for clients |
+
+<Note>
+  Both `is_active` and `is_validated` must be set to `true` by an administrator before the client can log in. See [Client Validation](/features/client-validation) for the admin workflow.
+</Note>
+
+## Registration Form Fields
+
+### Required Fields
+
+- **Full Name**: User's complete name (2-255 characters)
+- **Email**: Unique email address, used for login
+- **Password**: Must meet complexity requirements
+- **Password Confirmation**: Must match the password field
+- **Terms Acceptance**: Checkbox for terms and conditions
+
+### Optional Fields
+
+Clients can optionally provide:
+- **Phone**: Contact phone number
+- **Business Name**: Name of their business (stored in `business_name` field)
+
+<Note>
+  The `business_name` field is specific to client accounts and is not applicable to employees or administrators.
+</Note>
+
+## Password Security
+
+Passwords are secured using the following mechanisms:
+
+1. **Strength validation** on both frontend and backend
+2. **Bcrypt hashing** before storage (via `hash_password()` utility)
+3. **No paste/copy** allowed in password fields (frontend prevention)
+4. **Confirmation required** to prevent typos
+
+```python
+# Password validation in UserCreate schema
+@field_validator("password")
+@classmethod
+def validate_password_strength(cls, v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("La contraseña debe tener al menos 8 caracteres")
+    if not re.search(r"[A-Z]", v):
+        raise ValueError("La contraseña debe contener al menos una letra mayúscula")
+    if not re.search(r"[a-z]", v):
+        raise ValueError("La contraseña debe contener al menos una letra minúscula")
+    if not re.search(r"\d", v):
+        raise ValueError("La contraseña debe contener al menos un número")
+    return v
+```
+
+Reference: `be/app/schemas/user.py:28-40`
+
+## Error Handling
+
+### Duplicate Email
+
+If a user tries to register with an email that already exists:
+
+**Response**: `400 Bad Request`
+```json
+{
+  "detail": "El email ya está registrado"
+}
+```
+
+### Password Too Weak
+
+**Response**: `422 Unprocessable Entity`
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "password"],
+      "msg": "La contraseña debe tener al menos 8 caracteres",
+      "type": "value_error"
+    }
+  ]
+}
+```
+
+### Missing Role Configuration
+
+If the `client` role doesn't exist in the database:
+
+**Response**: `500 Internal Server Error`
+```json
+{
+  "detail": "Error de configuración: rol 'client' no encontrado"
+}
+```
+
+<Warning>
+  This error indicates a database initialization problem. Ensure the roles table is properly seeded with the `client` role.
+</Warning>
+
+## API Endpoint
+
+### Register New Client
+
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+
+{
+  "email": "cliente@ejemplo.com",
+  "full_name": "Juan Pérez",
+  "password": "SecurePass123"
+}
+```
+
+**Success Response** (`201 Created`):
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "cliente@ejemplo.com",
+  "full_name": "Juan Pérez",
+  "phone": null,
+  "is_active": false,
+  "is_validated": false,
+  "role_name": "client",
+  "business_name": null,
+  "occupation": null,
+  "created_at": "2026-03-03T10:30:00Z",
+  "updated_at": "2026-03-03T10:30:00Z"
+}
+```
+
+Reference: `be/app/routers/auth.py:33-60`
+
+## Database Schema
+
+New client accounts are stored in the `users` table:
+
+| Column | Type | Value for New Client |
+|--------|------|----------------------|
+| `id` | UUID | Auto-generated |
+| `email` | VARCHAR(255) | User's email (unique, indexed) |
+| `hashed_password` | VARCHAR(255) | Bcrypt hash |
+| `full_name` | VARCHAR(255) | User's full name |
+| `phone` | VARCHAR(20) | NULL (optional) |
+| `role_id` | UUID | ID of 'client' role |
+| `is_active` | BOOLEAN | `false` |
+| `is_validated` | BOOLEAN | `false` |
+| `must_change_password` | BOOLEAN | `false` |
+| `business_name` | VARCHAR(255) | NULL (optional) |
+| `occupation` | VARCHAR(100) | NULL (not used for clients) |
+| `validated_by` | UUID | NULL (not yet validated) |
+| `validated_at` | TIMESTAMP | NULL (not yet validated) |
+
+Reference: `be/app/models/user.py`
+
+## Related Features
+
+- [Client Validation](/features/client-validation) - How admins activate client accounts
+- [Password Management](/features/password-management) - Changing and resetting passwords
+- [Employee Management](/features/employee-management) - Different registration flow for employees
